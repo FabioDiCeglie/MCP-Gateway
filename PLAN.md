@@ -42,7 +42,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 4. **Small, reviewable diffs** — One milestone capability per PR/session when possible.
 5. **OSS-generic** — No employer-specific logic; patterns only.
 6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and, from M2, `docker compose up`).
-7. **Minimal layout** — Two Python modules for v0: `config.py` (YAML + Pydantic) and `main.py` (FastAPI app, routes, `uvicorn.run`).
+7. **Minimal layout** — `src/config.py` (YAML + Pydantic) and `src/main.py` (FastAPI app, routes, `uvicorn.run`). No nested package folder; entrypoint is `main()`.
 
 ---
 
@@ -149,8 +149,8 @@ Planning repo with README and build plan. No code yet.
 Set up the Python project and config loading — nothing proxied yet.
 
 - `pyproject.toml` with uv; deps: `mcp`, `httpx`, `fastapi`, `uvicorn`, `pyyaml`, `pydantic`
-- Package layout: `src/mcp_gateway/` — **`config.py`** (load/validate YAML) + **`main.py`** (FastAPI app, routes, startup)
-- Entrypoint: `uv run mcp-gateway` → `mcp_gateway.main:main` (plain `main()`, not `cli()`)
+- Package layout: `src/config.py` + `src/main.py` (no nested package folder)
+- Entrypoint: `uv run mcp-gateway` → `main:main` (plain `main()`, not `cli()`)
 - Routes defined FastAPI-style in `main()` after config load (e.g. `@app.get("/health")` stub today; `/mcp` proxy in M2)
 - `gateway.yaml`: listen host/port + upstream URL
 - Pydantic validation at startup; clear error on bad config
