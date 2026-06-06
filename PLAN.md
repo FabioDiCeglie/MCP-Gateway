@@ -41,7 +41,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 3. **Config over code** — Routes, upstreams, and policy live in files, not hard-coded constants.
 4. **Small, reviewable diffs** — One milestone capability per PR/session when possible.
 5. **OSS-generic** — No employer-specific logic; patterns only.
-6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally.
+6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and, from M2, `docker compose up`).
 
 ---
 
@@ -57,6 +57,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | Config | **YAML + Pydantic** | Human-readable; validates at startup |
 | Audit storage | SQLite → Postgres | M3 |
 | Observability | OpenTelemetry | M5 |
+| Local dev | **Docker + Docker Compose** | Introduced in M1–M2; stack grows per milestone |
 | Dashboard | React | Much later; not in v0 |
 
 ### Transport choice for v0
@@ -150,8 +151,10 @@ Set up the Python project and config loading — nothing proxied yet.
 - Package layout: `src/mcp_gateway/` with entrypoint (`uv run mcp-gateway`)
 - `gateway.yaml`: listen host/port + upstream URL
 - Pydantic validation at startup; clear error on bad config
+- `docker/Dockerfile`: `python:3.11-slim`, install `uv`, `uv sync --frozen`, expose **8080**
+- Bind-mount `src/` + `gateway.yaml` in dev so rebuilds aren't needed for every edit
 
-**Done when:** `uv run mcp-gateway --config gateway.yaml` starts and reads config without crashing (proxy can be a stub).
+**Done when:** `uv run mcp-gateway --config gateway.yaml` starts and reads config without crashing (proxy can be a stub); `docker build -f docker/Dockerfile .` succeeds and container starts with mounted config.
 
 ### M2 — Pass-through proxy
 
@@ -162,9 +165,11 @@ First working gateway — bytes in, bytes out. Client talks to gateway; gateway 
 - Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
 - No auth, no policy, no JSON-RPC parsing
 - `examples/upstream_server.py` (minimal FastMCP server) + `examples/test_client.py`
-- Smoke test: `initialize` + `tools/list` succeed via `http://127.0.0.1:8080/mcp`
+- `docker/compose.yaml`: `gateway` (**8080**) + `upstream` (**8000**) on `mcp-net`; config uses `http://upstream:8000/mcp` (service name, not `127.0.0.1`)
+- Optional `client` service (compose profile `test`) runs `examples/test_client.py` on the compose network
+- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` — works with `uv run` **and** `docker compose -f docker/compose.yaml up --build`
 
-**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only.
+**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; compose stack is the default way to run the full path locally.
 
 ### M3 — Tool policy
 
@@ -174,8 +179,9 @@ First control-plane feature — decide which tools may run before they hit upstr
 - Gateway parses JSON-RPC **only** for incoming `tools/call` requests
 - Allowed calls pass through unchanged; denied calls return structured MCP error
 - Everything else (`initialize`, `tools/list`, resources, etc.) still pass-through
+- Mount `policy.yaml` in compose (alongside `gateway.yaml`) so policy changes don't require image rebuild
 
-**Done when:** calling a denied tool fails at the gateway; allowed tools still work end-to-end.
+**Done when:** calling a denied tool fails at the gateway; allowed tools still work end-to-end via compose smoke test.
 
 ### M4 — Audit log
 
@@ -185,8 +191,9 @@ Durable record of what happened — for debugging and compliance.
 - Log every `tools/call`: timestamp, tool name, allow/deny, latency_ms, request_id
 - Log policy denials from M3
 - Client identity field reserved (populated once M5 lands)
+- Compose: named volume (or bind-mount `./data`) for SQLite file so audit data survives `docker compose down`
 
-**Done when:** after a test session, querying the DB shows tool calls with timestamps and outcomes.
+**Done when:** after a compose smoke session, querying the DB (host or `docker compose exec gateway`) shows tool calls with timestamps and outcomes.
 
 ### M5 — Auth
 
@@ -195,8 +202,9 @@ Lock down ingress — only known clients reach upstream.
 - API key via header (e.g. `Authorization: Bearer <key>` or `X-API-Key`)
 - Reject unauthenticated requests with 401 before proxy logic runs
 - Valid keys pass through; key identity written to audit log
+- Compose: API keys via env / `.env` (gitignored); `test_client` service passes key from same source
 
-**Done when:** request without key → 401; valid key → full proxy flow works.
+**Done when:** request without key → 401; valid key → full proxy flow works via compose.
 
 ### M6 — Observability
 
@@ -204,9 +212,10 @@ Make the gateway operable in production.
 
 - `GET /health` — liveness/readiness for orchestrators
 - OpenTelemetry spans: `gateway.request`, `upstream.call`, `policy.check`
-- `docs/runbook.md`: config reference, local run, deploy notes, common failures
+- `docs/runbook.md`: config reference, `uv run` + compose quick start, deploy notes, common failures
+- Compose: add `jaeger` (or `otel-collector`) service; gateway exporter endpoint via env
 
-**Done when:** traces visible in a local collector (Jaeger/OTel); runbook covers setup and troubleshooting.
+**Done when:** `docker compose up` shows traces in Jaeger UI; runbook documents the full compose stack (gateway, upstream, audit volume, tracing).
 
 ---
 
@@ -216,3 +225,4 @@ Make the gateway operable in production.
 - Not multi-region HA
 - Not stdio bridging (use [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) upstream)
 - Not a dashboard
+- Not Kubernetes / production-hardened images (non-root, distroless) — compose is dev-only for v0
