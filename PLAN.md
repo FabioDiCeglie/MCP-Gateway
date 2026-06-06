@@ -22,13 +22,13 @@ Production teams need a **single choke point** — not another agent framework.
 ```
 Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         │
-                        ├─ Auth (API keys / OAuth — M4)
-                        ├─ Policy engine (allow/deny tools — M2)
-                        ├─ Audit log (who called what, when — M3)
-                        └─ Tracing (OpenTelemetry — M5)
+                        ├─ Policy engine (allow/deny tools — M3)
+                        ├─ Audit log (who called what, when — M4)
+                        ├─ Auth (API keys / OAuth — M5)
+                        └─ Tracing (OpenTelemetry — M6)
 ```
 
-**M1 is intentionally dumb:** the gateway sits in the path and forwards traffic unchanged. Every later milestone adds a hook at that same insertion point without rewriting the proxy.
+**M2 is intentionally dumb:** the gateway sits in the path and forwards traffic unchanged. Every later milestone adds a hook at `MCPService.proxy()` without rewriting the proxy.
 
 ---
 
@@ -37,12 +37,12 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
 These guide every milestone. If a shortcut violates one, we don't take it.
 
 1. **One insertion point** — Clients talk to the gateway; the gateway talks to upstream. No bypass paths.
-2. **Transport first, semantics later** — M1 forwards bytes (HTTP). M2+ inspects JSON-RPC only where needed (e.g. `tools/call`).
+2. **Transport first, semantics later** — M2 forwards bytes (HTTP). M3+ inspects JSON-RPC only where needed (e.g. `tools/call`).
 3. **Config over code** — Routes, upstreams, and policy live in files, not hard-coded constants.
 4. **Small, reviewable diffs** — One milestone capability per PR/session when possible.
 5. **OSS-generic** — No employer-specific logic; patterns only.
-6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and, from M2, `docker compose up`).
-7. **Minimal layout** — `src/config.py` (YAML + Pydantic) and `src/main.py` (FastAPI app, routes, `uvicorn.run`). No nested package folder; entrypoint is `main()`.
+6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and `docker compose up`).
+7. **Thin layers** — `src/config.py` (YAML + Pydantic), `src/routes/` (HTTP adapters), `src/services/` (orchestration), `src/main.py` (app wiring + `uvicorn.run`). Entrypoint is `main()`.
 
 ---
 
@@ -56,20 +56,20 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | HTTP / ASGI | **FastAPI + uvicorn** | Familiar route style; Starlette under the hood for proxy + middleware |
 | Upstream HTTP | **httpx** | Async client for forwarding requests |
 | Config | **YAML + Pydantic** | Human-readable; validates at startup |
-| Audit storage | SQLite → Postgres | M3 |
-| Observability | OpenTelemetry | M5 |
+| Audit storage | SQLite → Postgres | M4 |
+| Observability | OpenTelemetry | M6 |
 | Local dev | **Docker + Docker Compose** | Introduced in M1–M2; stack grows per milestone |
 | Dashboard | React | Much later; not in v0 |
 
 ### Transport choice for v0
 
-| Transport | M1 | Notes |
+| Transport | M2 | Notes |
 |-----------|----|-------|
 | **Streamable HTTP** | ✅ Primary | Spec-recommended; gateway-friendly; one `/mcp` endpoint |
 | stdio | ❌ Later | Clients spawn processes; gateway wraps via `mcp-proxy` or similar |
 | SSE (legacy) | ❌ | Deprecated; not worth building on |
 
-M1 assumes upstream speaks **Streamable HTTP** at a known URL (e.g. `http://127.0.0.1:8000/mcp`).
+Gateway assumes upstream speaks **Streamable HTTP** at a known URL (e.g. `http://127.0.0.1:8000/mcp` in `gateway.yaml`).
 
 **Legacy (HTTP + SSE)** — two endpoints, two connections:
 
@@ -149,9 +149,9 @@ Planning repo with README and build plan. No code yet.
 Set up the Python project and config loading — nothing proxied yet.
 
 - `pyproject.toml` with uv; deps: `mcp`, `httpx`, `fastapi`, `uvicorn`, `pyyaml`, `pydantic`
-- Package layout: `src/config.py` + `src/main.py` (no nested package folder)
+- Package layout: `src/config.py` + `src/main.py`
 - Entrypoint: `uv run mcp-gateway` → `main:main` (plain `main()`, not `cli()`)
-- Routes defined FastAPI-style in `main()` after config load (e.g. `@app.get("/health")` stub today; `/mcp` proxy in M2)
+- `GET /health` stub (upstream URL in response)
 - `gateway.yaml`: listen host/port + upstream URL
 - Pydantic validation at startup; clear error on bad config
 - `docker/Dockerfile`: `python:3.11-slim`, install `uv`, `uv sync --frozen`, expose **8080**
@@ -165,16 +165,18 @@ Set up the Python project and config loading — nothing proxied yet.
 
 First working gateway — bytes in, bytes out. Client talks to gateway; gateway talks to upstream.
 
-- HTTP reverse proxy on `/mcp` in `main.py`: forward `GET` and `POST` to upstream URL from config (httpx; FastAPI route or middleware)
+- `src/routes/mcp.py` — HTTP adapter on `/mcp` (`GET`, `POST`, `DELETE`)
+- `src/services/mcp.py` — `MCPService.proxy()` forwards to upstream; streams SSE or returns buffered JSON; 502/504 on upstream errors
+- `src/routes/health.py` — `GET /health` (status + configured upstream URL)
+- `src/main.py` — FastAPI app, lifespan (shared `httpx.AsyncClient`), router registration, config load
 - Stream SSE responses without buffering the full body
 - Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
 - No auth, no policy, no JSON-RPC parsing
-- `examples/upstream_server.py` (minimal FastMCP server) + `examples/test_client.py`
-- `docker/docker-compose.yaml`: `gateway` (**8080**) + `upstream` (**8000**) on `mcp-net`; config uses `http://upstream:8000/mcp` (service name, not `127.0.0.1`)
-- Optional `client` service (compose profile `test`) runs `examples/test_client.py` on the compose network
-- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` — works with `uv run` **and** `docker compose up --build`
+- `gateway.yaml`: listen host/port + upstream URL (single file, no env override)
+- `docker/docker-compose.yaml`: `gateway` service (**8080**); bind-mount `src/` + `gateway.yaml`
+- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` against any external Streamable HTTP MCP server
 
-**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; compose stack is the default way to run the full path locally.
+**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; smoke test passes with `uv run` and `docker compose up`.
 
 ### M3 — Tool policy
 
@@ -207,7 +209,7 @@ Lock down ingress — only known clients reach upstream.
 - API key via header (e.g. `Authorization: Bearer <key>` or `X-API-Key`)
 - Reject unauthenticated requests with 401 before proxy logic runs
 - Valid keys pass through; key identity written to audit log
-- Compose: API keys via env / `.env` (gitignored); `test_client` service passes key from same source
+- Compose: API keys via env / `.env` (gitignored); smoke-test client passes key from same source
 
 **Done when:** request without key → 401; valid key → full proxy flow works via compose.
 
@@ -215,7 +217,7 @@ Lock down ingress — only known clients reach upstream.
 
 Make the gateway operable in production.
 
-- `GET /health` — liveness/readiness for orchestrators
+- Extend `GET /health` — liveness/readiness (upstream reachability) for orchestrators
 - OpenTelemetry spans: `gateway.request`, `upstream.call`, `policy.check`
 - `docs/runbook.md`: config reference, `uv run` + compose quick start, deploy notes, common failures
 - Compose: add `jaeger` (or `otel-collector`) service; gateway exporter endpoint via env
