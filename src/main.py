@@ -1,0 +1,39 @@
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import uvicorn
+from fastapi import FastAPI, Request
+
+from config import GatewayConfig, load_config
+
+app = FastAPI()
+
+
+@app.get("/health")
+async def health(request: Request):
+    config: GatewayConfig = request.app.state.config
+    return {"status": "ok", "upstream": str(config.upstream.url)}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="MCP Gateway")
+    parser.add_argument("--config", type=Path, default=Path("gateway.yaml"))
+    args = parser.parse_args()
+
+    try:
+        config = load_config(args.config)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    app.state.config = config
+
+    print(f"Listening on {config.listen.host}:{config.listen.port} → {config.upstream.url}")
+    uvicorn.run(app, host=config.listen.host, port=config.listen.port)
+
+
+if __name__ == "__main__":
+    main()
