@@ -124,176 +124,95 @@ One path for everything:
 
 ---
 
-## Repository layout (target)
-
-Evolve incrementally — don't scaffold everything on day one.
-
-```
-mcp-gateway/
-├── PLAN.md
-├── README.md
-├── pyproject.toml              # M1.1
-├── gateway.yaml                # M1.2 — upstream URL, listen addr
-├── src/
-│   └── mcp_gateway/
-│       ├── __init__.py
-│       ├── __main__.py         # `uv run mcp-gateway`
-│       ├── config.py           # load + validate gateway.yaml
-│       └── proxy.py            # HTTP pass-through (M1)
-├── examples/
-│   ├── upstream_server.py      # minimal FastMCP server for local dev
-│   └── test_client.py          # list tools via gateway
-└── tests/                      # M1.5+
-    └── test_proxy.py
-```
-
----
-
 ## Milestones
 
 | # | Goal | Done |
 |---|------|------|
 | M0 | Repo, PLAN.md, README | [x] |
-| M1 | Pass-through proxy (client → gateway → server) | [ ] |
-| M2 | Tool allowlist / denylist policy | [ ] |
-| M3 | Audit log per tool call | [ ] |
-| M4 | Auth on gateway ingress | [ ] |
-| M5 | OTel spans + basic run docs | [ ] |
+| M1 | Scaffold + config | [ ] |
+| M2 | Pass-through proxy | [ ] |
+| M3 | Tool policy | [ ] |
+| M4 | Audit log | [ ] |
+| M5 | Auth | [ ] |
+| M6 | Observability | [ ] |
 
----
+### M0 — Repo
 
-## M1 — Pass-through proxy
+Planning repo with README and build plan. No code yet.
 
-**Goal:** A client can reach an MCP server **only** through the gateway.
+**Done:** [x]
 
-**Non-goals for M1:** auth, policy, audit, stdio bridging, multi-upstream routing, TLS termination.
+### M1 — Scaffold + config
 
-### M1 sub-steps (do in order)
+Set up the Python project and config loading — nothing proxied yet.
 
-| Step | What | Exit check |
-|------|------|------------|
-| **M1.1** | Project scaffold (`pyproject.toml`, `src/mcp_gateway/`, `uv`) | `uv run python -c "import mcp_gateway"` works |
-| **M1.2** | `gateway.yaml` — listen host/port + upstream URL | Invalid config fails fast with clear error |
-| **M1.3** | HTTP reverse proxy — forward `GET`/`POST` on `/mcp` to upstream | `curl` through gateway returns same status/body as direct |
-| **M1.4** | Header forwarding — `Accept`, `Content-Type`, `Mcp-Session-Id`, SSE headers | MCP client session survives multiple round-trips |
-| **M1.5** | Example upstream server + test client script | 3-terminal demo documented in README |
-| **M1.6** | Smoke test (pytest or script) | CI-ready check that `tools/list` works via gateway |
+- `pyproject.toml` with uv; deps: `mcp`, `httpx`, `uvicorn`, `pyyaml`, `pydantic`
+- Package layout: `src/mcp_gateway/` with entrypoint (`uv run mcp-gateway`)
+- `gateway.yaml`: listen host/port + upstream URL
+- Pydantic validation at startup; clear error on bad config
 
-### M1 proxy behavior (spec)
+**Done when:** `uv run mcp-gateway --config gateway.yaml` starts and reads config without crashing (proxy can be a stub).
 
-```
-Client                    Gateway                     Upstream
-  │  POST /mcp (JSON-RPC)     │                            │
-  ├──────────────────────────►│  POST upstream.url         │
-  │                           ├───────────────────────────►│
-  │                           │◄───────────────────────────┤
-  │◄──────────────────────────┤  (stream or JSON body)     │
-  │                           │                            │
-  │  GET /mcp (SSE, optional) │                            │
-  ├──────────────────────────►│  GET upstream.url          │
-  │                           ├───────────────────────────►│
-  │◄──── SSE stream ──────────┤◄──── SSE stream ───────────┤
-```
+### M2 — Pass-through proxy
 
-- **Pass-through:** request body and response body are not parsed in M1.
-- **Streaming:** if upstream returns `text/event-stream`, gateway streams chunks without buffering the full response.
-- **Hop-by-hop headers** (`Connection`, `Transfer-Encoding`, etc.) are stripped; **MCP session headers** are preserved.
+First working gateway — bytes in, bytes out. Client talks to gateway; gateway talks to upstream.
 
-### Example config (`gateway.yaml`)
+- HTTP reverse proxy on `/mcp`: forward `GET` and `POST` to upstream URL from config
+- Stream SSE responses without buffering the full body
+- Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
+- No auth, no policy, no JSON-RPC parsing
+- `examples/upstream_server.py` (minimal FastMCP server) + `examples/test_client.py`
+- Smoke test: `initialize` + `tools/list` succeed via `http://127.0.0.1:8080/mcp`
 
-```yaml
-listen:
-  host: "127.0.0.1"
-  port: 8080
+**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only.
 
-upstream:
-  url: "http://127.0.0.1:8000/mcp"
-```
+### M3 — Tool policy
 
-### Local demo (3 terminals)
+First control-plane feature — decide which tools may run before they hit upstream.
 
-```bash
-# Terminal 1 — upstream MCP server
-uv run examples/upstream_server.py
+- Policy file (YAML): global or per-route allow/deny lists
+- Gateway parses JSON-RPC **only** for incoming `tools/call` requests
+- Allowed calls pass through unchanged; denied calls return structured MCP error
+- Everything else (`initialize`, `tools/list`, resources, etc.) still pass-through
 
-# Terminal 2 — gateway
-uv run mcp-gateway --config gateway.yaml
+**Done when:** calling a denied tool fails at the gateway; allowed tools still work end-to-end.
 
-# Terminal 3 — verify (test client or MCP Inspector → http://127.0.0.1:8080/mcp)
-uv run examples/test_client.py
-```
+### M4 — Audit log
 
-### M1 exit criteria (all must pass)
+Durable record of what happened — for debugging and compliance.
 
-- [ ] Client connects to gateway URL, not upstream URL
-- [ ] `initialize` + `tools/list` succeed through gateway
-- [ ] Upstream URL is configurable via `gateway.yaml` only
-- [ ] README has copy-paste run instructions
+- SQLite append-only store (single file, zero ops for v0)
+- Log every `tools/call`: timestamp, tool name, allow/deny, latency_ms, request_id
+- Log policy denials from M3
+- Client identity field reserved (populated once M5 lands)
 
----
+**Done when:** after a test session, querying the DB shows tool calls with timestamps and outcomes.
 
-## M2 — Tool policy
+### M5 — Auth
 
-**Goal:** Block disallowed `tools/call` before they reach upstream.
+Lock down ingress — only known clients reach upstream.
 
-- Policy file (YAML): allowed/denied tools per route or globally
-- Gateway parses JSON-RPC **only** for `tools/call` requests
-- Structured MCP error on denial; log violation (stdout → structured logs in M3)
+- API key via header (e.g. `Authorization: Bearer <key>` or `X-API-Key`)
+- Reject unauthenticated requests with 401 before proxy logic runs
+- Valid keys pass through; key identity written to audit log
 
-**Exit criteria:** Calling a denied tool returns gateway error; allowed tools still pass through.
+**Done when:** request without key → 401; valid key → full proxy flow works.
 
----
+### M6 — Observability
 
-## M3 — Audit log
+Make the gateway operable in production.
 
-**Goal:** Durable record of every tool call (and policy denial).
-
-- SQLite first (single file, zero ops)
-- Fields: timestamp, client id (placeholder until M4), tool name, allow/deny, latency_ms, request_id
-- Append-only; no PII in v0 unless explicitly configured
-
-**Exit criteria:** Query audit DB after a session; see tool calls with timestamps.
-
----
-
-## M4 — Auth on ingress
-
-**Goal:** Only authenticated clients reach upstream.
-
-- API key header (v0 auth — simple, widely understood)
-- Reject unauthenticated requests before proxy
-- Optional: forward identity to audit log
-
-**Exit criteria:** Request without key → 401; valid key → proxy works.
-
----
-
-## M5 — Observability + ops docs
-
-**Goal:** Production-debuggable gateway.
-
+- `GET /health` — liveness/readiness for orchestrators
 - OpenTelemetry spans: `gateway.request`, `upstream.call`, `policy.check`
-- `docs/runbook.md`: deploy, config reference, troubleshooting
-- Health endpoint (`GET /health`)
+- `docs/runbook.md`: config reference, local run, deploy notes, common failures
 
-**Exit criteria:** Traces visible in local OTel collector or Jaeger; runbook covers common failures.
+**Done when:** traces visible in a local collector (Jaeger/OTel); runbook covers setup and troubleshooting.
 
 ---
 
 ## Non-goals (v0)
 
-- Not a Langfuse/LangSmith clone
-- Not tied to any specific product domain
-- Not multi-region HA on day one
-- Not a stdio-to-HTTP bridge (use [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) upstream if needed)
-- Not a UI dashboard
-
----
-
-## Open questions (resolve as we go)
-
-| Question | Lean | Revisit |
-|----------|------|---------|
-| Single vs multi-upstream routing | Single upstream in M1 | M2+ add named routes |
-| Stateful vs stateless gateway | Stateless HTTP proxy in M1 | Re-evaluate if session stickiness needed |
-| License | MIT (match MCP SDK) | Before first public release |
+- Not Langfuse/LangSmith
+- Not multi-region HA
+- Not stdio bridging (use [mcp-proxy](https://github.com/sparfenyuk/mcp-proxy) upstream)
+- Not a dashboard
