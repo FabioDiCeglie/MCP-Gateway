@@ -2,20 +2,27 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 
-from config import GatewayConfig, load_config
+from config import load_config
+from routes import health_router, mcp_router
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with httpx.AsyncClient(follow_redirects=False) as client:
+        app.state.http_client = client
+        yield
 
 
-@app.get("/health")
-async def health(request: Request):
-    config: GatewayConfig = request.app.state.config
-    return {"status": "ok", "upstream": str(config.upstream.url)}
+app = FastAPI(lifespan=lifespan)
+app.include_router(health_router)
+app.include_router(mcp_router)
 
 
 def main() -> None:
