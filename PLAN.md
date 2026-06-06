@@ -42,6 +42,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 4. **Small, reviewable diffs** — One milestone capability per PR/session when possible.
 5. **OSS-generic** — No employer-specific logic; patterns only.
 6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and, from M2, `docker compose up`).
+7. **Minimal layout** — Two Python modules for v0: `config.py` (YAML + Pydantic) and `main.py` (FastAPI app, routes, `uvicorn.run`).
 
 ---
 
@@ -52,7 +53,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | Runtime | **Python 3.11+** | Team preference; strong MCP ecosystem |
 | Package manager | **uv** | Fast, lockfile, modern default for new Python projects |
 | MCP SDK | **`mcp`** ([python-sdk](https://github.com/modelcontextprotocol/python-sdk)) | Official SDK; client + server + Streamable HTTP |
-| HTTP / ASGI | **Starlette + uvicorn** | Lightweight; enough for proxy + future middleware |
+| HTTP / ASGI | **FastAPI + uvicorn** | Familiar route style; Starlette under the hood for proxy + middleware |
 | Upstream HTTP | **httpx** | Async client for forwarding requests |
 | Config | **YAML + Pydantic** | Human-readable; validates at startup |
 | Audit storage | SQLite → Postgres | M3 |
@@ -130,7 +131,7 @@ One path for everything:
 | # | Goal | Done |
 |---|------|------|
 | M0 | Repo, PLAN.md, README | [x] |
-| M1 | Scaffold + config | [ ] |
+| M1 | Scaffold + config | [x] |
 | M2 | Pass-through proxy | [ ] |
 | M3 | Tool policy | [ ] |
 | M4 | Audit log | [ ] |
@@ -147,12 +148,16 @@ Planning repo with README and build plan. No code yet.
 
 Set up the Python project and config loading — nothing proxied yet.
 
-- `pyproject.toml` with uv; deps: `mcp`, `httpx`, `uvicorn`, `pyyaml`, `pydantic`
-- Package layout: `src/mcp_gateway/` with entrypoint (`uv run mcp-gateway`)
+- `pyproject.toml` with uv; deps: `mcp`, `httpx`, `fastapi`, `uvicorn`, `pyyaml`, `pydantic`
+- Package layout: `src/mcp_gateway/` — **`config.py`** (load/validate YAML) + **`main.py`** (FastAPI app, routes, startup)
+- Entrypoint: `uv run mcp-gateway` → `mcp_gateway.main:main` (plain `main()`, not `cli()`)
+- Routes defined FastAPI-style in `main()` after config load (e.g. `@app.get("/health")` stub today; `/mcp` proxy in M2)
 - `gateway.yaml`: listen host/port + upstream URL
 - Pydantic validation at startup; clear error on bad config
 - `docker/Dockerfile`: `python:3.11-slim`, install `uv`, `uv sync --frozen`, expose **8080**
-- Bind-mount `src/` + `gateway.yaml` in dev so rebuilds aren't needed for every edit
+- `docker/compose.dev.yaml`: bind-mount `src/` + `gateway.yaml` so rebuilds aren't needed for every edit
+
+**Done:** [x]
 
 **Done when:** `uv run mcp-gateway --config gateway.yaml` starts and reads config without crashing (proxy can be a stub); `docker build -f docker/Dockerfile .` succeeds and container starts with mounted config.
 
@@ -160,7 +165,7 @@ Set up the Python project and config loading — nothing proxied yet.
 
 First working gateway — bytes in, bytes out. Client talks to gateway; gateway talks to upstream.
 
-- HTTP reverse proxy on `/mcp`: forward `GET` and `POST` to upstream URL from config
+- HTTP reverse proxy on `/mcp` in `main.py`: forward `GET` and `POST` to upstream URL from config (httpx; FastAPI route or middleware)
 - Stream SSE responses without buffering the full body
 - Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
 - No auth, no policy, no JSON-RPC parsing
