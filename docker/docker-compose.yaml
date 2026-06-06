@@ -1,5 +1,6 @@
 services:
   gateway:
+    container_name: mcp-gateway
     build:
       context: ..
       dockerfile: docker/Dockerfile
