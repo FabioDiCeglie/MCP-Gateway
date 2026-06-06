@@ -155,7 +155,7 @@ Set up the Python project and config loading — nothing proxied yet.
 - `gateway.yaml`: listen host/port + upstream URL
 - Pydantic validation at startup; clear error on bad config
 - `docker/Dockerfile`: `python:3.11-slim`, install `uv`, `uv sync --frozen`, expose **8080**
-- `docker/compose.dev.yaml`: bind-mount `src/` + `gateway.yaml` so rebuilds aren't needed for every edit
+- `docker/docker-compose.yaml`: bind-mount `src/` + `gateway.yaml` so rebuilds aren't needed for every edit
 
 **Done:** [x]
 
@@ -170,9 +170,9 @@ First working gateway — bytes in, bytes out. Client talks to gateway; gateway 
 - Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
 - No auth, no policy, no JSON-RPC parsing
 - `examples/upstream_server.py` (minimal FastMCP server) + `examples/test_client.py`
-- `docker/compose.yaml`: `gateway` (**8080**) + `upstream` (**8000**) on `mcp-net`; config uses `http://upstream:8000/mcp` (service name, not `127.0.0.1`)
+- `docker/docker-compose.yaml`: `gateway` (**8080**) + `upstream` (**8000**) on `mcp-net`; config uses `http://upstream:8000/mcp` (service name, not `127.0.0.1`)
 - Optional `client` service (compose profile `test`) runs `examples/test_client.py` on the compose network
-- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` — works with `uv run` **and** `docker compose -f docker/compose.yaml up --build`
+- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` — works with `uv run` **and** `docker compose up --build`
 
 **Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; compose stack is the default way to run the full path locally.
 
