@@ -7,32 +7,79 @@ COMPOSE_FILE="${ROOT}/docker/docker-compose.yaml"
 GATEWAY_HEALTH_URL="http://127.0.0.1:8080/health"
 MAX_WAIT_SECONDS=60
 
+ok() {
+  echo "    OK  $*"
+}
+
+fail() {
+  echo "    FAIL  $*" >&2
+}
+
+print_pass() {
+  local client_output="$1"
+
+  echo
+  echo "========================================"
+  echo "  E2E DOCKER PASSED"
+  echo "========================================"
+  echo "  flow:   client → gateway (:8080) → server (:8000)"
+  echo "  health: ${GATEWAY_HEALTH_URL}"
+  echo "  client: $(grep '^Connected to' <<<"${client_output}")"
+  echo "  tools:  $(grep '^Tools:' <<<"${client_output}" | cut -d' ' -f2-)"
+  echo "========================================"
+  echo "  logs: docker compose -f docker/docker-compose.yaml logs"
+  echo "========================================"
+}
+
+wait_for_client() {
+  local deadline=$((SECONDS + MAX_WAIT_SECONDS))
+  local status
+
+  while true; do
+    status="$(docker inspect -f '{{.State.Status}}' mcp-client 2>/dev/null || echo "missing")"
+    if [[ "${status}" == "exited" ]]; then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      fail "mcp-client did not finish within ${MAX_WAIT_SECONDS}s"
+      docker compose -f "${COMPOSE_FILE}" logs
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 cd "${ROOT}"
 
+echo
+echo "==> E2E docker smoke test"
+echo
+
 echo "==> Cleaning Docker stack"
-docker compose -f "${COMPOSE_FILE}" --profile test down -v --remove-orphans
+docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
+ok "docker stack cleaned"
 
-echo "==> Starting stack"
+echo "==> Starting stack (server + gateway + client)"
 docker compose -f "${COMPOSE_FILE}" up -d --build
+ok "containers started"
 
-echo "==> Waiting for gateway (${GATEWAY_HEALTH_URL})"
-deadline=$((SECONDS + MAX_WAIT_SECONDS))
-until curl -sf "${GATEWAY_HEALTH_URL}" >/dev/null; do
-  if (( SECONDS >= deadline )); then
-    echo "error: gateway did not become ready within ${MAX_WAIT_SECONDS}s" >&2
-    docker compose -f "${COMPOSE_FILE}" logs
-    exit 1
-  fi
-  sleep 1
-done
+echo "==> Waiting for mcp-client"
+wait_for_client
+ok "mcp-client finished"
 
-echo "==> Running client through gateway (Docker network)"
-output="$(docker compose -f "${COMPOSE_FILE}" --profile test run --rm mcp-client)"
-echo "${output}"
+output="$(docker compose -f "${COMPOSE_FILE}" logs --no-log-prefix mcp-client 2>&1)"
+echo "${output}" | sed 's/^/    /'
 
-if ! grep -q "Tools: echo" <<<"${output}"; then
-  echo "error: expected tool 'echo' in client output" >&2
+exit_code="$(docker inspect -f '{{.State.ExitCode}}' mcp-client)"
+if [[ "${exit_code}" != "0" ]]; then
+  fail "mcp-client exited with code ${exit_code}"
   exit 1
 fi
 
-echo "==> E2E passed"
+if ! grep -q "Tools: echo" <<<"${output}"; then
+  fail "expected tool 'echo' in client output"
+  exit 1
+fi
+ok "client received tools/list via gateway"
+
+print_pass "${output}"

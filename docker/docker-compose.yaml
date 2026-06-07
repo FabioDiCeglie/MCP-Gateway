@@ -24,14 +24,27 @@ services:
       - ../src:/app/src:ro
     depends_on:
       - mcp-server
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
 
   mcp-client:
     container_name: mcp-client
-    profiles: ["test"]
     build:
       context: ..
       dockerfile: docker/Dockerfile
     command: ["uv", "run", "mcp-client", "--url", "http://gateway:8080/mcp"]
     depends_on:
-      - gateway
-      - mcp-server
+      gateway:
+        condition: service_healthy
+      mcp-server:
+        condition: service_started

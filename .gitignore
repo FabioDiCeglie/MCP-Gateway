@@ -3,6 +3,7 @@ dist/
 .env
 .DS_Store
 *.log
+tests/.logs/
 .venv/
 __pycache__/
 *.py[cod]

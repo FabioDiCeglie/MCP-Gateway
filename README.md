@@ -4,21 +4,43 @@ A control plane between MCP clients and MCP servers — auth, policy, audit, and
 
 See [PLAN.md](./PLAN.md) for the build plan.
 
-## Local smoke test
+## Local running
 
-Run all three from the repo root in separate terminals. The client talks to the gateway on `:8080`, not the server directly.
+All commands from the repo root:
+
+| Service | Command | Port |
+|---------|---------|------|
+| Upstream MCP server | `uv run mcp-server` | `:8000` |
+| Gateway | `uv run mcp-gateway` | `:8080` |
+| Test client | `uv run mcp-client` | — (talks to gateway) |
+
+Flow: **client → gateway → server**. The client never hits the server directly.
+
+Start server and gateway in separate terminals, then run the client when ready.
+
+## E2E tests
+
+### Local
+
+**Manual** — three terminals:
 
 ```bash
-uv run mcp-server    # upstream MCP server (:8000)
-uv run mcp-gateway   # gateway (:8080)
-uv run mcp-client    # client → gateway → server
+uv run mcp-server
+uv run mcp-gateway
+uv run mcp-client
+```
+
+**Automated** — cleans docker + local processes, starts server and gateway, runs the client, prints pass/fail:
+
+```bash
+./tests/e2e-local.sh
 ```
 
 Expected client output: `Tools: echo`
 
-## Docker smoke test
+### Docker
 
-Same flow, but everything runs in containers. Compose overrides the upstream URL so the gateway reaches `mcp-server` on the Docker network.
+Starts server, gateway, and client. The client runs once after the gateway is healthy, then exits.
 
 ```bash
 cd docker
@@ -26,7 +48,9 @@ docker compose build
 docker compose up -d
 ```
 
-Or run the full e2e script from the repo root (cleans stack, starts services, runs the client):
+Compose overrides `GATEWAY_UPSTREAM_URL` so the gateway reaches `mcp-server` on the Docker network. The client runs once and exits — use the automated script to verify output.
+
+**Automated:**
 
 ```bash
 ./tests/e2e-docker.sh
