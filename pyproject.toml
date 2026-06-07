@@ -15,6 +15,7 @@ dependencies = [
 
 [project.scripts]
 mcp-gateway = "main:main"
+mcp-server = "mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -31,6 +32,7 @@ only-include = ["src/main.py", "src/config.py", "src/routes", "src/services"]
 "src/routes/mcp.py" = "routes/mcp.py"
 "src/services/__init__.py" = "services/__init__.py"
 "src/services/mcp.py" = "services/mcp.py"
+"mcp-server/server.py" = "mcp_server.py"
 
 [tool.uv]
 package = true
