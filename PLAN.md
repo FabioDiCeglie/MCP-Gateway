@@ -38,11 +38,11 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 
 1. **One insertion point** — Clients talk to the gateway; the gateway talks to upstream. No bypass paths.
 2. **Transport first, semantics later** — M2 forwards bytes (HTTP). M3+ inspects JSON-RPC only where needed (e.g. `tools/call`).
-3. **Config over code** — Routes, upstreams, and policy live in files, not hard-coded constants.
+3. **Config over code** — Upstreams and policy live in env/files, not hard-coded constants.
 4. **Small, reviewable diffs** — One milestone capability per PR/session when possible.
 5. **OSS-generic** — No employer-specific logic; patterns only.
 6. **Test the wire** — Each milestone ships a way to prove bytes or messages flow end-to-end locally (`uv run` and `docker compose up`).
-7. **Thin layers** — `src/config.py` (YAML + Pydantic), `src/routes/` (HTTP adapters), `src/services/` (orchestration), `src/main.py` (app wiring + `uvicorn.run`). Entrypoint is `main()`.
+7. **Thin layers** — `src/config.py` (env + Pydantic), `src/routes/` (HTTP adapters), `src/services/` (orchestration), `src/main.py` (app wiring + `uvicorn.run`). Entrypoint is `main()`.
 
 ---
 
@@ -55,7 +55,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | MCP SDK | **`mcp`** ([python-sdk](https://github.com/modelcontextprotocol/python-sdk)) | Official SDK; client + server + Streamable HTTP |
 | HTTP / ASGI | **FastAPI + uvicorn** | Familiar route style; Starlette under the hood for proxy + middleware |
 | Upstream HTTP | **httpx** | Async client for forwarding requests |
-| Config | **YAML + Pydantic** | Human-readable; validates at startup |
+| Config | **Env vars + YAML (policy)** | Gateway via env; policy file in M3 |
 | Audit storage | SQLite → Postgres | M4 |
 | Observability | OpenTelemetry | M6 |
 | Local dev | **Docker + Docker Compose** | Introduced in M1–M2; stack grows per milestone |
@@ -69,7 +69,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | stdio | ❌ Later | Clients spawn processes; gateway wraps via `mcp-proxy` or similar |
 | SSE (legacy) | ❌ | Deprecated; not worth building on |
 
-Gateway assumes upstream speaks **Streamable HTTP** at a known URL (e.g. `http://127.0.0.1:8000/mcp` in `gateway.yaml`).
+Gateway assumes upstream speaks **Streamable HTTP** at a known URL (e.g. `GATEWAY_UPSTREAM_URL=http://127.0.0.1:8000/mcp`).
 
 **Legacy (HTTP + SSE)** — two endpoints, two connections:
 
@@ -152,14 +152,14 @@ Set up the Python project and config loading — nothing proxied yet.
 - Package layout: `src/config.py` + `src/main.py`
 - Entrypoint: `uv run mcp-gateway` → `main:main` (plain `main()`, not `cli()`)
 - `GET /health` stub (upstream URL in response)
-- `gateway.yaml`: listen host/port + upstream URL
+- Gateway config: listen on `0.0.0.0:8080`; upstream via `GATEWAY_UPSTREAM_URL` env
 - Pydantic validation at startup; clear error on bad config
 - `docker/Dockerfile`: `python:3.11-slim`, install `uv`, `uv sync --frozen`, expose **8080**
-- `docker/docker-compose.yaml`: bind-mount `src/` + `gateway.yaml` so rebuilds aren't needed for every edit
+- `docker/docker-compose.yaml`: bind-mount `src/` so rebuilds aren't needed for every edit
 
 **Done:** [x]
 
-**Done when:** `uv run mcp-gateway --config gateway.yaml` starts and reads config without crashing (proxy can be a stub); `docker build -f docker/Dockerfile .` succeeds and container starts with mounted config.
+**Done when:** `uv run mcp-gateway` starts and reads config without crashing (proxy can be a stub); `docker build -f docker/Dockerfile .` succeeds and container starts.
 
 ### M2 — Pass-through proxy
 
@@ -172,8 +172,8 @@ First working gateway — bytes in, bytes out. Client talks to gateway; gateway 
 - Stream SSE responses without buffering the full body
 - Forward MCP-relevant headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, etc.); strip hop-by-hop headers
 - No auth, no policy, no JSON-RPC parsing
-- `gateway.yaml`: listen host/port + upstream URL (single file, no env override)
-- `docker/docker-compose.yaml`: `gateway` service (**8080**); bind-mount `src/` + `gateway.yaml`
+- Gateway config via env (`GATEWAY_UPSTREAM_URL`); listen on `0.0.0.0:8080`
+- `docker/docker-compose.yaml`: `gateway`, `mcp-server`, `mcp-client` services; bind-mount `src/`
 - Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` against any external Streamable HTTP MCP server
 
 **Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; smoke test passes with `uv run` and `docker compose up`.
@@ -186,7 +186,7 @@ First control-plane feature — decide which tools may run before they hit upstr
 - Gateway parses JSON-RPC **only** for incoming `tools/call` requests
 - Allowed calls pass through unchanged; denied calls return structured MCP error
 - Everything else (`initialize`, `tools/list`, resources, etc.) still pass-through
-- Mount `policy.yaml` in compose (alongside `gateway.yaml`) so policy changes don't require image rebuild
+- Mount `policy.yaml` in compose so policy changes don't require image rebuild
 
 **Done when:** calling a denied tool fails at the gateway; allowed tools still work end-to-end via compose smoke test.
 

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+import os
 
-import yaml
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
 
 class ListenConfig(BaseModel):
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = Field(default=8080, ge=1, le=65535)
 
 
@@ -21,20 +19,13 @@ class GatewayConfig(BaseModel):
     upstream: UpstreamConfig
 
 
-def load_config(path: Path) -> GatewayConfig:
-    """Load and validate gateway config from a YAML file."""
-    if not path.is_file():
-        raise FileNotFoundError(f"Config file not found: {path}")
+def load_config() -> GatewayConfig:
+    """Load and validate gateway config."""
+    upstream_url = os.environ.get("GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8000/mcp")
 
     try:
-        raw: Any = yaml.safe_load(path.read_text())
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML in {path}: {exc}") from exc
-
-    if raw is None:
-        raise ValueError(f"Config file is empty: {path}")
-
-    try:
-        return GatewayConfig.model_validate(raw)
+        return GatewayConfig(
+            upstream=UpstreamConfig(url=upstream_url),
+        )
     except ValidationError as exc:
-        raise ValueError(f"Invalid config in {path}:\n{exc}") from exc
+        raise ValueError(f"Invalid gateway configuration:\n{exc}") from exc

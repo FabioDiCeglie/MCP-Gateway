@@ -2,7 +2,7 @@
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("demo-server", host="127.0.0.1", port=8000)
+mcp = FastMCP("demo-server", host="0.0.0.0", port=8000)
 
 
 @mcp.tool()

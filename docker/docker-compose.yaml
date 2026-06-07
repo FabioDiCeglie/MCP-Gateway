@@ -1,11 +1,37 @@
 services:
+  mcp-server:
+    container_name: mcp-server
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["uv", "run", "mcp-server"]
+    expose:
+      - "8000"
+
   gateway:
     container_name: mcp-gateway
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      GATEWAY_UPSTREAM_URL: http://mcp-server:8000/mcp
     ports:
       - "8080:8080"
     volumes:
       - ../src:/app/src:ro
-      - ../gateway.yaml:/app/gateway.yaml:ro
+    depends_on:
+      - mcp-server
+
+  mcp-client:
+    container_name: mcp-client
+    profiles: ["test"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["uv", "run", "mcp-client", "--url", "http://gateway:8080/mcp"]
+    depends_on:
+      - gateway
+      - mcp-server

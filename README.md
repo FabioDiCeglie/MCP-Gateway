@@ -14,6 +14,30 @@ uv run mcp-gateway   # gateway on :8080
 uv run mcp-client    # client → gateway → server
 ```
 
+## Docker Compose smoke test
+
+Start the stack (server + gateway):
+
+```bash
+docker compose -f docker/docker-compose.yaml up --build
+```
+
+Run the client once (separate terminal):
+
+```bash
+docker compose -f docker/docker-compose.yaml --profile test run --rm mcp-client
+```
+
+## Configuration
+
+Gateway listens on `0.0.0.0:8080` (fixed). Copy `.env.example` to `.env` and adjust if needed:
+
+| Variable | Default | Example (compose) |
+|----------|---------|-------------------|
+| `GATEWAY_UPSTREAM_URL` | `http://127.0.0.1:8000/mcp` | `http://mcp-server:8000/mcp` |
+
+Compose loads `../.env` if present, but overrides `GATEWAY_UPSTREAM_URL` to reach the server on the Docker network.
+
 ## Streamable HTTP session lifecycle
 
 One client run is not a single HTTP call. Streamable HTTP MCP opens a session, streams on a GET, sends RPCs over POST, then closes with DELETE:

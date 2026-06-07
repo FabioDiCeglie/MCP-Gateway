@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import argparse
 import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 import uvicorn
@@ -26,13 +24,9 @@ app.include_router(mcp_router)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="MCP Gateway")
-    parser.add_argument("--config", type=Path, default=Path("gateway.yaml"))
-    args = parser.parse_args()
-
     try:
-        config = load_config(args.config)
-    except (FileNotFoundError, ValueError) as exc:
+        config = load_config()
+    except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
 
