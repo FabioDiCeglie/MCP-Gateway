@@ -6,37 +6,31 @@ See [PLAN.md](./PLAN.md) for the build plan.
 
 ## Local smoke test
 
-Three terminals from the repo root:
+Run all three from the repo root in separate terminals. The client talks to the gateway on `:8080`, not the server directly.
 
 ```bash
-uv run mcp-server    # upstream on :8000
-uv run mcp-gateway   # gateway on :8080
+uv run mcp-server    # upstream MCP server (:8000)
+uv run mcp-gateway   # gateway (:8080)
 uv run mcp-client    # client → gateway → server
 ```
 
-## Docker Compose smoke test
+Expected client output: `Tools: echo`
 
-Start the stack (server + gateway):
+## Docker smoke test
 
-```bash
-docker compose -f docker/docker-compose.yaml up --build
-```
-
-Run the client once (separate terminal):
+Same flow, but everything runs in containers. Compose overrides the upstream URL so the gateway reaches `mcp-server` on the Docker network.
 
 ```bash
-docker compose -f docker/docker-compose.yaml --profile test run --rm mcp-client
+cd docker
+docker compose build
+docker compose up -d
 ```
 
-## Configuration
+Or run the full e2e script from the repo root (cleans stack, starts services, runs the client):
 
-Gateway listens on `0.0.0.0:8080` (fixed). Copy `.env.example` to `.env` and adjust if needed:
-
-| Variable | Default | Example (compose) |
-|----------|---------|-------------------|
-| `GATEWAY_UPSTREAM_URL` | `http://127.0.0.1:8000/mcp` | `http://mcp-server:8000/mcp` |
-
-Compose loads `../.env` if present, but overrides `GATEWAY_UPSTREAM_URL` to reach the server on the Docker network.
+```bash
+./tests/e2e-docker.sh
+```
 
 ## Streamable HTTP session lifecycle
 
