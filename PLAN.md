@@ -132,7 +132,7 @@ One path for everything:
 |---|------|------|
 | M0 | Repo, PLAN.md, README | [x] |
 | M1 | Scaffold + config | [x] |
-| M2 | Pass-through proxy | [ ] |
+| M2 | Pass-through proxy | [x] |
 | M3 | Tool policy | [ ] |
 | M4 | Audit log | [ ] |
 | M5 | Auth | [ ] |
@@ -174,9 +174,11 @@ First working gateway — bytes in, bytes out. Client talks to gateway; gateway 
 - No auth, no policy, no JSON-RPC parsing
 - Gateway config via env (`GATEWAY_UPSTREAM_URL`); listen on `0.0.0.0:8080`
 - `docker/docker-compose.yaml`: `gateway`, `mcp-server`, `mcp-client` services; bind-mount `src/`
-- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` against any external Streamable HTTP MCP server
+- Smoke test: `initialize` + `tools/list` via `http://127.0.0.1:8080/mcp` — `tests/e2e-local.sh`, `tests/e2e-docker.sh`
 
-**Done when:** client reaches MCP server only through the gateway; upstream URL is config-only; smoke test passes with `uv run` and `docker compose up`.
+**Done:** [x]
+
+**Done when:** client reaches MCP server only through the gateway; smoke test passes with `uv run` and `docker compose up`.
 
 ### M3 — Tool policy
 
