@@ -2,7 +2,7 @@
 
 A control plane between MCP clients and MCP servers — auth, policy, audit, and observability.
 
-See [DOCS.md](./DOCS.md) for architecture, design decisions, and configuration reference.
+See [DOCS.md](./DOCS.md) for architecture and design decisions.
 
 ## Local running
 
@@ -56,4 +56,23 @@ Compose overrides `GATEWAY_UPSTREAM_URL` so the gateway reaches `mcp-server` on 
 
 ```bash
 ./tests/e2e-docker.sh
+```
+
+## Project layout
+
+```
+src/
+  config.py           # GatewayConfig, policy loading
+  main.py             # FastAPI app + entrypoint
+  routes/
+    mcp.py            # /mcp proxy route
+    health.py         # GET /health
+  services/
+    mcp.py            # MCPService — upstream proxy
+    tools_policy.py   # ToolsPolicyService — tools/call allow-list
+policy.yaml           # Tool policy (tools_allowed)
+mcp-server/           # Demo upstream (echo, ping)
+mcp-client/           # Smoke-test client
+docker/               # Dockerfile + compose stack
+tests/                # e2e-local.sh, e2e-docker.sh
 ```

@@ -28,27 +28,35 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         └─ Tracing (OpenTelemetry)
 ```
 
+**Working in progress**: More capabilities (audit log, auth, tracing) will get their own sections and diagrams as they land.
+
+### Tool policy
+
 ```mermaid
-flowchart LR
-  Client[MCP Client] --> Route["routes/mcp.py"]
-  Route --> MCP["MCPService.proxy()"]
-  MCP --> Policy["ToolsPolicyService"]
-  Policy -->|allowed or pass-through| Upstream[MCP Server]
-  Policy -->|denied tools/call| Error[JSON-RPC error]
+sequenceDiagram
+    participant C as MCP Client
+    participant R as routes/mcp.py
+    participant P as MCPService
+    participant T as ToolsPolicyService
+    participant S as MCP Server
+
+    C->>R: POST /mcp (tools/call)
+    R->>P: proxy()
+    P->>T: check_post(body)
+
+    alt tool in tools_allowed
+        T-->>P: pass
+        P->>S: forward
+        S-->>P: result
+        P-->>C: HTTP 200
+    else tool not allowed
+        T-->>P: PolicyDenial
+        P-->>C: HTTP 200 + JSON-RPC error
+        Note over S: never called
+    end
 ```
 
-### Layers
-
-| Layer | Path | Role |
-|-------|------|------|
-| HTTP adapter | `src/routes/` | FastAPI routes; wire services; no business logic |
-| Orchestration | `src/services/` | Proxy, policy checks, future audit/auth hooks |
-| Config | `src/config.py` | Env vars + `policy.yaml` loaded at startup |
-| Entrypoint | `src/main.py` | App wiring, lifespan, `uvicorn.run` |
-
-**Composition root:** `routes/mcp.py` constructs `ToolsPolicyService` and `MCPService` per request. Policy is loaded once at startup via `load_config()`.
-
-**Insertion point:** `MCPService.proxy()` — by default the gateway forwards bytes unchanged. Each new control-plane capability adds a hook here without rewriting the proxy.
+Everything else (`initialize`, `tools/list`, GET, DELETE) skips policy and passes through unchanged.
 
 ---
 
@@ -86,16 +94,9 @@ tools_allowed:
 - **Extensible schema** — future keys (e.g. `resources_allowed`) can live in the same file without renaming the loader.
 - **Docker** — `policy.yaml` is bind-mounted into the gateway container; edit and restart, no image rebuild.
 
-### What gets checked
+Configuration: upstream URL via `GATEWAY_UPSTREAM_URL` (default `http://127.0.0.1:8000/mcp`, see `.env.example`); gateway listens on `0.0.0.0:8080`; missing or invalid `policy.yaml` exits at startup.
 
 Policy applies **only** to incoming `POST` bodies where JSON-RPC `method == "tools/call"`.
-
-| Traffic | Behavior |
-|---------|----------|
-| `tools/call` + tool in `tools_allowed` | Forward to upstream |
-| `tools/call` + tool not in `tools_allowed` | Deny at gateway |
-| `initialize`, `tools/list`, resources, prompts | Pass-through |
-| `GET` (SSE), `DELETE` | Pass-through |
 
 **Why only `tools/call`?** That is where side effects happen — API calls, writes, shell commands. Discovery and read paths stay untouched; control is applied at the execution boundary only.
 
@@ -120,42 +121,9 @@ Denied calls return **HTTP 200** with a JSON-RPC error body:
 
 ---
 
-## Configuration reference
-
-| Setting | Source | Default | Notes |
-|---------|--------|---------|-------|
-| Upstream URL | `GATEWAY_UPSTREAM_URL` env | `http://127.0.0.1:8000/mcp` | Streamable HTTP endpoint |
-| Listen address | hardcoded | `0.0.0.0:8080` | Gateway port |
-| Tool policy | `policy.yaml` | required at startup | `tools_allowed` list |
-
-Invalid config or missing `policy.yaml` → gateway exits at startup with a clear error.
-
----
-
 ## Design principles
 
 1. **One insertion point** — no bypass paths around the gateway
 2. **Transport first, semantics later** — forward bytes by default; parse JSON-RPC only where control is needed
 3. **Config over code** — upstream and policy in env/files, not hard-coded
 4. **Test the wire** — every capability ships with an e2e smoke test (`./tests/e2e-local.sh`, `./tests/e2e-docker.sh`)
-
----
-
-## Project layout
-
-```
-src/
-  config.py           # GatewayConfig, policy loading
-  main.py             # FastAPI app + entrypoint
-  routes/
-    mcp.py            # /mcp proxy route
-    health.py         # GET /health
-  services/
-    mcp.py            # MCPService — upstream proxy
-    tools_policy.py   # ToolsPolicyService — tools/call allow-list
-policy.yaml           # Tool policy (tools_allowed)
-mcp-server/           # Demo upstream (echo, ping)
-mcp-client/           # Smoke-test client
-docker/               # Dockerfile + compose stack
-tests/                # e2e-local.sh, e2e-docker.sh
-```
