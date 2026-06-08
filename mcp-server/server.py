@@ -11,6 +11,12 @@ def echo(message: str) -> str:
     return message
 
 
+@mcp.tool()
+def ping() -> str:
+    """Return a fixed pong response."""
+    return "pong"
+
+
 def main() -> None:
     mcp.run(transport="streamable-http")
 

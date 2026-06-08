@@ -117,10 +117,22 @@ echo "==> Running mcp-client through gateway"
 output="$(uv run mcp-client 2>&1)"
 echo "${output}" | sed 's/^/    /'
 
-if ! grep -q "Tools: echo" <<<"${output}"; then
-  fail "expected tool 'echo' in client output"
+if ! grep -q "Tools: echo, ping" <<<"${output}"; then
+  fail "expected tools 'echo, ping' in client output"
   exit 1
 fi
 ok "client received tools/list via gateway"
+
+if ! grep -q "echo: hello" <<<"${output}"; then
+  fail "expected allowed echo call to succeed"
+  exit 1
+fi
+ok "allowed tool call passed through gateway"
+
+if ! grep -q "ping: denied" <<<"${output}"; then
+  fail "expected denied ping call at gateway"
+  exit 1
+fi
+ok "denied tool call blocked at gateway"
 
 print_pass "${output}"

@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from config import GatewayConfig
 from services.mcp import MCPService
+from services.tools_policy import ToolsPolicyService
 
 router = APIRouter()
 
@@ -24,7 +25,8 @@ async def proxy_mcp(request: Request) -> Response:
     config: GatewayConfig = request.app.state.config
     client: httpx.AsyncClient = request.app.state.http_client
 
-    mcp_service = MCPService(client, str(config.upstream.url))
+    tools_policy_service = ToolsPolicyService(config.policy)
+    mcp_service = MCPService(client, str(config.upstream.url), tools_policy_service)
     result = await mcp_service.proxy(
         method=request.method,
         headers=request.headers,

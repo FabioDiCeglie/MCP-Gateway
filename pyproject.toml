@@ -33,6 +33,7 @@ only-include = ["src/main.py", "src/config.py", "src/routes", "src/services"]
 "src/routes/mcp.py" = "routes/mcp.py"
 "src/services/__init__.py" = "services/__init__.py"
 "src/services/mcp.py" = "services/mcp.py"
+"src/services/tools_policy.py" = "services/tools_policy.py"
 "mcp-server/server.py" = "mcp_server.py"
 "mcp-client/client.py" = "mcp_client.py"
 

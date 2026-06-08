@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from services.tools_policy import ToolsPolicyService
+
 HOP_BY_HOP_HEADERS = frozenset(
     {
         "connection",
@@ -29,9 +31,15 @@ class ProxyResult:
 
 
 class MCPService:
-    def __init__(self, client: httpx.AsyncClient, upstream_url: str) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        upstream_url: str,
+        tools_policy_service: ToolsPolicyService,
+    ) -> None:
         self._client = client
         self._upstream_url = upstream_url
+        self._tools_policy = tools_policy_service
 
     async def proxy(
         self,
@@ -39,6 +47,15 @@ class MCPService:
         headers: Mapping[str, str],
         body: bytes,
     ) -> ProxyResult:
+        if method == "POST" and body:
+            denial = self._tools_policy.check_post(body)
+            if denial is not None:
+                return ProxyResult(
+                    status_code=denial.status_code,
+                    headers=denial.headers,
+                    body=denial.body,
+                )
+
         upstream_request = self._client.build_request(
             method=method,
             url=self._upstream_url,

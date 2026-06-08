@@ -1,0 +1,4 @@
+# Tools the gateway may forward to upstream (allow-list).
+# Any tools/call not listed here is denied at the gateway.
+tools_allowed:
+  - echo

@@ -1,4 +1,4 @@
-"""Smoke-test client: initialize + tools/list through the gateway."""
+"""Smoke-test client: initialize, tools/list, and tools/call through the gateway."""
 
 from __future__ import annotations
 
@@ -20,6 +20,18 @@ async def run(url: str) -> None:
             names = [tool.name for tool in tools.tools]
             print(f"Connected to {url}")
             print(f"Tools: {', '.join(names)}")
+
+            try:
+                await session.call_tool("echo", {"message": "hello"})
+                print("echo: hello")
+            except Exception as exc:
+                print(f"echo: denied ({exc})")
+
+            try:
+                await session.call_tool("ping", {})
+                print("ping: pong")
+            except Exception as exc:
+                print(f"ping: denied ({exc})")
 
 
 def main() -> None:

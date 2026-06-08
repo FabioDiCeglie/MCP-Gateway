@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md policy.yaml ./
 COPY src ./src
 COPY mcp-server ./mcp-server
 COPY mcp-client ./mcp-client
