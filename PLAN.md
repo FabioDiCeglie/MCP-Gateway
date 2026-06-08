@@ -133,7 +133,7 @@ One path for everything:
 | M0 | Repo, PLAN.md, README | [x] |
 | M1 | Scaffold + config | [x] |
 | M2 | Pass-through proxy | [x] |
-| M3 | Tool policy | [ ] |
+| M3 | Tool policy | [x] |
 | M4 | Audit log | [ ] |
 | M5 | Auth | [ ] |
 | M6 | Observability | [ ] |
