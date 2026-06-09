@@ -10,8 +10,6 @@ from typing import Any, Literal
 
 import psycopg
 
-from services.tools_policy import ToolCall
-
 AuditOutcome = Literal["allowed", "denied"]
 
 # For local development environment, use SQLite.
@@ -25,6 +23,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
     request_id TEXT,
     client_identity TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events (timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_events_tool_name_timestamp
+    ON audit_events (tool_name, timestamp);
 """
 
 # For Docker environment or production, use PostgreSQL.
@@ -38,6 +39,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
     request_id TEXT,
     client_identity TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events (timestamp);
+CREATE INDEX IF NOT EXISTS idx_audit_events_tool_name_timestamp
+    ON audit_events (tool_name, timestamp);
 """
 
 
@@ -130,22 +134,21 @@ class AuditService:
 
     def record_tool_call(
         self,
-        tool_call: ToolCall | None,
+        *,
+        tool_name: str,
+        request_id: Any,
         outcome: AuditOutcome,
         started_at: float | None = None,
     ) -> None:
-        if tool_call is None:
-            return
-
         latency_ms = 0
         if outcome == "allowed" and started_at is not None:
             latency_ms = max(0, int((time.perf_counter() - started_at) * 1000))
 
         self.record(
-            tool_name=tool_call.tool_name,
+            tool_name=tool_name,
             outcome=outcome,
             latency_ms=latency_ms,
-            request_id=tool_call.request_id,
+            request_id=request_id,
         )
 
     def _open_sqlite(self) -> None:
@@ -158,8 +161,14 @@ class AuditService:
 
     def _open_postgres(self) -> None:
         self._conn = psycopg.connect(self._db_path)
+        statements = [
+            statement.strip()
+            for statement in _POSTGRES_SCHEMA.split(";")
+            if statement.strip()
+        ]
         with self._conn.cursor() as cur:
-            cur.execute(_POSTGRES_SCHEMA)
+            for statement in statements:
+                cur.execute(statement)
         self._conn.commit()
 
 

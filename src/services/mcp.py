@@ -57,7 +57,11 @@ class MCPService:
             if tool_call is not None:
                 denial = self._tools_policy.check_post(body)
                 if denial is not None:
-                    self._audit.record_tool_call(tool_call, "denied")
+                    self._audit.record_tool_call(
+                        tool_name=tool_call.tool_name,
+                        request_id=tool_call.request_id,
+                        outcome="denied",
+                    )
                     return ProxyResult(
                         status_code=denial.status_code,
                         headers=denial.headers,
@@ -75,13 +79,31 @@ class MCPService:
         try:
             upstream_response = await self._client.send(upstream_request, stream=True)
         except httpx.TimeoutException:
-            self._audit.record_tool_call(tool_call, "allowed", started_at)
+            if tool_call is not None:
+                self._audit.record_tool_call(
+                    tool_name=tool_call.tool_name,
+                    request_id=tool_call.request_id,
+                    outcome="allowed",
+                    started_at=started_at,
+                )
             return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
         except httpx.RequestError:
-            self._audit.record_tool_call(tool_call, "allowed", started_at)
+            if tool_call is not None:
+                self._audit.record_tool_call(
+                    tool_name=tool_call.tool_name,
+                    request_id=tool_call.request_id,
+                    outcome="allowed",
+                    started_at=started_at,
+                )
             return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
 
-        self._audit.record_tool_call(tool_call, "allowed", started_at)
+        if tool_call is not None:
+            self._audit.record_tool_call(
+                tool_name=tool_call.tool_name,
+                request_id=tool_call.request_id,
+                outcome="allowed",
+                started_at=started_at,
+            )
 
         response_headers = self._forward_response_headers(upstream_response.headers)
 

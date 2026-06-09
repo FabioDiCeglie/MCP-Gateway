@@ -26,7 +26,7 @@ uv run mcp-gateway
 uv run mcp-client
 ```
 
-**Automated (local)** — cleans docker + local processes, starts server and gateway, runs the client, prints pass/fail:
+**Automated (local)** — cleans docker + local processes, starts server and gateway, runs the client, prints pass/fail and the audit log table:
 
 ```bash
 ./tests/e2e-local.sh
@@ -52,7 +52,7 @@ docker compose up -d
 
 Compose overrides `GATEWAY_UPSTREAM_URL` so the gateway reaches `mcp-server` on the Docker network, and bind-mounts `policy.yaml` into the gateway container.
 
-**Automated (docker):**
+**Automated (docker):** same checks; prints the audit log table from Postgres.
 
 ```bash
 ./tests/e2e-docker.sh
