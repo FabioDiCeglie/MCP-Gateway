@@ -23,8 +23,8 @@ Production teams need a **single choke point** — not another agent framework.
 Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         │
                         ├─ Policy engine (allow/deny tools — M3)
-                        ├─ Audit log (who called what, when — M4)
-                        ├─ Auth (API keys / OAuth — M5)
+                        ├─ Audit log (what happened — M4; who — M5 fills `client_identity`)
+                        ├─ Auth (API keys — M5; identity → audit)
                         └─ Tracing (OpenTelemetry — M6)
 ```
 
@@ -135,7 +135,7 @@ One path for everything:
 | M2 | Pass-through proxy | [x] |
 | M3 | Tool policy | [x] |
 | M4 | Audit log | [x] |
-| M5 | Auth | [ ] |
+| M5 | Auth + `client_identity` in audit | [ ] |
 | M6 | Observability | [ ] |
 
 ### M0 — Repo
@@ -209,14 +209,16 @@ Durable record of what happened — for debugging and compliance.
 
 ### M5 — Auth
 
-Lock down ingress — only known clients reach upstream.
+Lock down ingress — only known clients reach upstream. **Completes the audit story:** M4 reserved `client_identity`; M5 fills it from the authenticated client.
 
 - API key via header (e.g. `Authorization: Bearer <key>` or `X-API-Key`)
-- Reject unauthenticated requests with 401 before proxy logic runs
-- Valid keys pass through; key identity written to audit log
+- Reject unauthenticated requests with 401 before proxy / policy / audit on protected routes
+- Valid keys pass through; resolved key identity (e.g. key id or label from config) passed into `AuditService.record_tool_call(..., client_identity=...)`
+- Every audited `tools/call` row includes **who** called it — not just what and when
 - Compose: API keys via env / `.env` (gitignored); smoke-test client passes key from same source
+- E2E: extend smoke test to assert `client_identity` is set in audit rows (SQLite local, Postgres docker)
 
-**Done when:** request without key → 401; valid key → full proxy flow works via compose.
+**Done when:** request without key → 401; valid key → full proxy flow works via compose; audit query shows `client_identity` populated for allowed and denied tool calls.
 
 ### M6 — Observability
 
