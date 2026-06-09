@@ -27,8 +27,21 @@ print_pass() {
   echo "  client: $(grep '^Connected to' <<<"${client_output}")"
   echo "  tools:  $(grep '^Tools:' <<<"${client_output}" | cut -d' ' -f2-)"
   echo "========================================"
-  echo "  logs: docker compose -f docker/docker-compose.yaml logs"
-  echo "========================================"
+}
+
+cleanup_docker() {
+  docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+cleanup_on_exit() {
+  local exit_code=$?
+  if (( exit_code != 0 )); then
+    echo
+    echo "==> Cleaning Docker stack"
+    cleanup_docker
+    ok "docker stack cleaned"
+  fi
+  exit "${exit_code}"
 }
 
 wait_for_client() {
@@ -50,13 +63,14 @@ wait_for_client() {
 }
 
 cd "${ROOT}"
+trap cleanup_on_exit EXIT
 
 echo
 echo "==> E2E docker smoke test"
 echo
 
 echo "==> Cleaning Docker stack"
-docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
+cleanup_docker
 ok "docker stack cleaned"
 
 echo "==> Starting stack (server + gateway + client)"
@@ -117,3 +131,8 @@ fi
 ok "audit logged denied ping call"
 
 print_pass "${output}"
+
+echo
+echo "==> Cleaning Docker stack"
+cleanup_docker
+ok "docker stack cleaned"
