@@ -22,10 +22,16 @@ class PolicyConfig(BaseModel):
     tools_allowed: list[str] = Field(default_factory=list)
 
 
+class AuditConfig(BaseModel):
+    # File path for local SQLite, or postgres:// URL in Docker.
+    db_path: str = "data/audit.db"
+
+
 class GatewayConfig(BaseModel):
     listen: ListenConfig = Field(default_factory=ListenConfig)
     upstream: UpstreamConfig
     policy: PolicyConfig
+    audit: AuditConfig = Field(default_factory=AuditConfig)
 
 
 def load_policy() -> PolicyConfig:
@@ -52,11 +58,13 @@ def load_policy() -> PolicyConfig:
 def load_config() -> GatewayConfig:
     """Load and validate gateway config."""
     upstream_url = os.environ.get("GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8000/mcp")
+    audit_db_path = os.environ.get("GATEWAY_AUDIT_DB_PATH", "data/audit.db")
 
     try:
         return GatewayConfig(
             upstream=UpstreamConfig(url=upstream_url),
             policy=load_policy(),
+            audit=AuditConfig(db_path=audit_db_path),
         )
     except ValidationError as exc:
         raise ValueError(f"Invalid gateway configuration:\n{exc}") from exc

@@ -4,6 +4,7 @@ dist/
 .DS_Store
 *.log
 tests/.logs/
+data/
 .venv/
 __pycache__/
 *.py[cod]

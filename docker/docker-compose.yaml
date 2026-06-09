@@ -8,6 +8,24 @@ services:
     expose:
       - "8000"
 
+  postgres:
+    container_name: postgres
+    image: postgres:16-alpine
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gateway}
+      POSTGRES_DB: ${POSTGRES_DB:-audit}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   gateway:
     container_name: mcp-gateway
     build:
@@ -18,13 +36,17 @@ services:
         required: false
     environment:
       GATEWAY_UPSTREAM_URL: http://mcp-server:8000/mcp
+      GATEWAY_AUDIT_DB_PATH: postgresql://${POSTGRES_USER:-gateway}:${POSTGRES_PASSWORD:-gateway}@postgres:5432/${POSTGRES_DB:-audit}
     ports:
       - "8080:8080"
     volumes:
       - ../src:/app/src:ro
       - ../policy.yaml:/app/policy.yaml:ro
     depends_on:
-      - mcp-server
+      mcp-server:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -49,3 +71,6 @@ services:
         condition: service_healthy
       mcp-server:
         condition: service_started
+
+volumes:
+  postgres-data:
