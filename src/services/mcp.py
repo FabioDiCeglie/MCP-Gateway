@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
 import httpx
 
-from services.tools_policy import ToolsPolicyService
+from services.audit import AuditService
+from services.tools_policy import ToolCall, ToolsPolicyService
 
 HOP_BY_HOP_HEADERS = frozenset(
     {
@@ -36,10 +38,12 @@ class MCPService:
         client: httpx.AsyncClient,
         upstream_url: str,
         tools_policy_service: ToolsPolicyService,
+        audit_service: AuditService,
     ) -> None:
         self._client = client
         self._upstream_url = upstream_url
         self._tools_policy = tools_policy_service
+        self._audit = audit_service
 
     async def proxy(
         self,
@@ -47,14 +51,20 @@ class MCPService:
         headers: Mapping[str, str],
         body: bytes,
     ) -> ProxyResult:
+        tool_call: ToolCall | None = None
         if method == "POST" and body:
-            denial = self._tools_policy.check_post(body)
-            if denial is not None:
-                return ProxyResult(
-                    status_code=denial.status_code,
-                    headers=denial.headers,
-                    body=denial.body,
-                )
+            tool_call = ToolsPolicyService.parse_tool_call(body)
+            if tool_call is not None:
+                denial = self._tools_policy.check_post(body)
+                if denial is not None:
+                    self._audit.record_tool_call(tool_call, "denied")
+                    return ProxyResult(
+                        status_code=denial.status_code,
+                        headers=denial.headers,
+                        body=denial.body,
+                    )
+
+        started_at = time.perf_counter() if tool_call is not None else None
 
         upstream_request = self._client.build_request(
             method=method,
@@ -65,9 +75,13 @@ class MCPService:
         try:
             upstream_response = await self._client.send(upstream_request, stream=True)
         except httpx.TimeoutException:
+            self._audit.record_tool_call(tool_call, "allowed", started_at)
             return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
         except httpx.RequestError:
+            self._audit.record_tool_call(tool_call, "allowed", started_at)
             return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
+
+        self._audit.record_tool_call(tool_call, "allowed", started_at)
 
         response_headers = self._forward_response_headers(upstream_response.headers)
 

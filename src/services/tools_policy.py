@@ -17,6 +17,12 @@ class ToolsPolicyDenial:
     body: bytes
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    request_id: Any
+    tool_name: str
+
+
 class ToolsPolicyService:
     def __init__(self, policy: PolicyConfig) -> None:
         self._allowed_tools = set(policy.tools_allowed)
@@ -26,7 +32,18 @@ class ToolsPolicyService:
 
     def check_post(self, body: bytes) -> ToolsPolicyDenial | None:
         """Inspect a POST body; return a denial response for blocked tools/call."""
-        message = self._parse_json_rpc(body)
+        tool_call = self.parse_tool_call(body)
+        if tool_call is None:
+            return None
+
+        if self.is_allowed(tool_call.tool_name):
+            return None
+
+        return self._deny_tool_call(tool_call.request_id, tool_call.tool_name)
+
+    @staticmethod
+    def parse_tool_call(body: bytes) -> ToolCall | None:
+        message = ToolsPolicyService._parse_json_rpc(body)
         if message is None:
             return None
 
@@ -41,10 +58,7 @@ class ToolsPolicyService:
         if not isinstance(tool_name, str):
             return None
 
-        if self.is_allowed(tool_name):
-            return None
-
-        return self._deny_tool_call(message.get("id"), tool_name)
+        return ToolCall(request_id=message.get("id"), tool_name=tool_name)
 
     @staticmethod
     def _parse_json_rpc(body: bytes) -> dict[str, Any] | None:

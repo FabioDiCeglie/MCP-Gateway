@@ -68,8 +68,9 @@ src/
     mcp.py            # /mcp proxy route
     health.py         # GET /health
   services/
-    mcp.py            # MCPService — upstream proxy
+    mcp.py            # MCPService — upstream proxy + audit hook
     tools_policy.py   # ToolsPolicyService — tools/call allow-list
+    audit.py          # AuditService — append-only tool call log
 policy.yaml           # Tool policy (tools_allowed)
 mcp-server/           # Demo upstream (echo, ping)
 mcp-client/           # Smoke-test client

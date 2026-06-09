@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import psycopg
+
+from services.tools_policy import ToolCall
 
 AuditOutcome = Literal["allowed", "denied"]
 
@@ -124,6 +127,26 @@ class AuditService:
             params,
         )
         self._conn.commit()
+
+    def record_tool_call(
+        self,
+        tool_call: ToolCall | None,
+        outcome: AuditOutcome,
+        started_at: float | None = None,
+    ) -> None:
+        if tool_call is None:
+            return
+
+        latency_ms = 0
+        if outcome == "allowed" and started_at is not None:
+            latency_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+
+        self.record(
+            tool_name=tool_call.tool_name,
+            outcome=outcome,
+            latency_ms=latency_ms,
+            request_id=tool_call.request_id,
+        )
 
     def _open_sqlite(self) -> None:
         path = Path(self._db_path)

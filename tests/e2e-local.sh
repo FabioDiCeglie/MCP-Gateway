@@ -108,6 +108,7 @@ wait_for_port 8000 "mcp-server"
 ok "mcp-server listening on :8000"
 
 echo "==> Starting mcp-gateway (:8080)"
+rm -f "${ROOT}/data/audit.db"
 uv run mcp-gateway >"${LOG_DIR}/mcp-gateway.log" 2>&1 &
 GATEWAY_PID=$!
 wait_for_health
@@ -134,5 +135,57 @@ if ! grep -q "ping: denied" <<<"${output}"; then
   exit 1
 fi
 ok "denied tool call blocked at gateway"
+
+echo "==> Checking audit log in SQLite"
+audit_table="$(uv run python -c "
+import sqlite3
+from pathlib import Path
+
+conn = sqlite3.connect(Path('${ROOT}') / 'data' / 'audit.db')
+columns = ['id', 'timestamp', 'tool_name', 'outcome', 'latency_ms', 'request_id']
+rows = conn.execute(
+    f\"SELECT {', '.join(columns)} FROM audit_events ORDER BY id\"
+).fetchall()
+
+widths = [len(col) for col in columns]
+for row in rows:
+    for index, value in enumerate(row):
+        widths[index] = max(widths[index], len(str(value) if value is not None else ''))
+
+def format_row(cells):
+    return '  '.join(
+        str(cell if cell is not None else '').ljust(widths[index])
+        for index, cell in enumerate(cells)
+    )
+
+lines = [
+    format_row(columns),
+    '  '.join('-' * width for width in widths),
+    *(format_row(row) for row in rows),
+]
+print('\n'.join(lines))
+")"
+echo "${audit_table}" | sed 's/^/    /'
+
+audit_rows="$(uv run python -c "
+import sqlite3
+conn = sqlite3.connect('${ROOT}/data/audit.db')
+for tool_name, outcome in conn.execute(
+    'SELECT tool_name, outcome FROM audit_events ORDER BY id'
+):
+    print(f'{tool_name}|{outcome}')
+")"
+
+if ! grep -q "^echo|allowed$" <<<"${audit_rows}"; then
+  fail "expected audit row: echo|allowed"
+  exit 1
+fi
+ok "audit logged allowed echo call"
+
+if ! grep -q "^ping|denied$" <<<"${audit_rows}"; then
+  fail "expected audit row: ping|denied"
+  exit 1
+fi
+ok "audit logged denied ping call"
 
 print_pass "${output}"

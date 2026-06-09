@@ -94,4 +94,26 @@ if ! grep -q "ping: denied" <<<"${output}"; then
 fi
 ok "denied tool call blocked at gateway"
 
+echo "==> Checking audit log in Postgres"
+audit_table="$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+  psql -U "${POSTGRES_USER:-gateway}" -d "${POSTGRES_DB:-audit}" \
+  -c "SELECT id, timestamp, tool_name, outcome, latency_ms, request_id FROM audit_events ORDER BY id")"
+echo "${audit_table}" | sed 's/^/    /'
+
+audit_rows="$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
+  psql -U "${POSTGRES_USER:-gateway}" -d "${POSTGRES_DB:-audit}" -t -A \
+  -c "SELECT tool_name, outcome FROM audit_events ORDER BY id")"
+
+if ! grep -q "^echo|allowed$" <<<"${audit_rows}"; then
+  fail "expected audit row: echo|allowed"
+  exit 1
+fi
+ok "audit logged allowed echo call"
+
+if ! grep -q "^ping|denied$" <<<"${audit_rows}"; then
+  fail "expected audit row: ping|denied"
+  exit 1
+fi
+ok "audit logged denied ping call"
+
 print_pass "${output}"

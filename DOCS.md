@@ -28,9 +28,9 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         └─ Tracing (OpenTelemetry)
 ```
 
-**Working in progress**: More capabilities (audit log, auth, tracing) will get their own sections and diagrams as they land.
+**Working in progress**: Auth and tracing will get their own sections and diagrams as they land.
 
-### Tool policy
+### Tool policy + audit
 
 ```mermaid
 sequenceDiagram
@@ -38,6 +38,7 @@ sequenceDiagram
     participant R as routes/mcp.py
     participant P as MCPService
     participant T as ToolsPolicyService
+    participant A as AuditService
     participant S as MCP Server
 
     C->>R: POST /mcp (tools/call)
@@ -48,15 +49,47 @@ sequenceDiagram
         T-->>P: pass
         P->>S: forward
         S-->>P: result
+        P->>A: record(allowed, latency_ms)
         P-->>C: HTTP 200
     else tool not allowed
         T-->>P: PolicyDenial
+        P->>A: record(denied)
         P-->>C: HTTP 200 + JSON-RPC error
         Note over S: never called
     end
 ```
 
-Everything else (`initialize`, `tools/list`, GET, DELETE) skips policy and passes through unchanged.
+Everything else (`initialize`, `tools/list`, GET, DELETE) skips policy and audit; traffic passes through unchanged.
+
+---
+
+## Audit log
+
+Append-only record of every `tools/call` — for debugging and compliance.
+
+### What gets logged
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | UTC ISO-8601 |
+| `tool_name` | From JSON-RPC `params.name` |
+| `outcome` | `allowed` or `denied` |
+| `latency_ms` | Upstream round-trip for allowed calls; `0` for denials |
+| `request_id` | JSON-RPC `id` |
+| `client_identity` | Reserved for M5 (auth) — `NULL` for now |
+
+Denied calls are logged **before** the policy error is returned. Allowed calls are logged after the upstream responds (or times out).
+
+### Storage
+
+Configured via `GATEWAY_AUDIT_DB_PATH`:
+
+| Environment | Value | Backend |
+|-------------|-------|---------|
+| Local `uv run` | `data/audit.db` (default) | SQLite file, auto-created |
+| Docker Compose | `postgresql://…@postgres:5432/audit` | Postgres service |
+
+Postgres credentials live in `.env` (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`). Compose builds the gateway URL from those vars.
 
 ---
 

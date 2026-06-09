@@ -134,7 +134,7 @@ One path for everything:
 | M1 | Scaffold + config | [x] |
 | M2 | Pass-through proxy | [x] |
 | M3 | Tool policy | [x] |
-| M4 | Audit log | [ ] |
+| M4 | Audit log | [x] |
 | M5 | Auth | [ ] |
 | M6 | Observability | [ ] |
 
@@ -200,9 +200,12 @@ Durable record of what happened — for debugging and compliance.
 - Log every `tools/call`: timestamp, tool name, allow/deny, latency_ms, request_id
 - Log policy denials from M3
 - Client identity field reserved (populated once M5 lands)
-- Compose: named volume (or bind-mount `./data`) for SQLite file so audit data survives `docker compose down`
+- Compose: Postgres service + `postgres-data` volume; SQLite file for local `uv run`
+- `GATEWAY_AUDIT_DB_PATH` — file path (SQLite) or connection URL (Postgres)
 
-**Done when:** after a compose smoke session, querying the DB (host or `docker compose exec gateway`) shows tool calls with timestamps and outcomes.
+**Done:** [x]
+
+**Done when:** after a compose smoke session, querying the DB (host or `docker compose exec postgres`) shows tool calls with timestamps and outcomes.
 
 ### M5 — Auth
 
