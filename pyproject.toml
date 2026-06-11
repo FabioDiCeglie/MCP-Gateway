@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.34",
     "psycopg[binary]>=3.2",
+    "pyjwt[crypto]>=2.10",
 ]
 
 [project.scripts]
@@ -24,7 +25,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src/main.py", "src/config.py", "src/routes", "src/services"]
+only-include = ["src/main.py", "src/config.py", "src/deps", "src/routes", "src/services"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/main.py" = "main.py"
@@ -32,10 +33,13 @@ only-include = ["src/main.py", "src/config.py", "src/routes", "src/services"]
 "src/routes/__init__.py" = "routes/__init__.py"
 "src/routes/health.py" = "routes/health.py"
 "src/routes/mcp.py" = "routes/mcp.py"
+"src/deps/__init__.py" = "deps/__init__.py"
+"src/deps/auth.py" = "deps/auth.py"
 "src/services/__init__.py" = "services/__init__.py"
 "src/services/mcp.py" = "services/mcp.py"
 "src/services/tools_policy.py" = "services/tools_policy.py"
 "src/services/audit.py" = "services/audit.py"
+"src/services/auth.py" = "services/auth.py"
 "mcp-server/server.py" = "mcp_server.py"
 "mcp-client/client.py" = "mcp_client.py"
 

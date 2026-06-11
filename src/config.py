@@ -27,11 +27,21 @@ class AuditConfig(BaseModel):
     db_path: str = "data/audit.db"
 
 
+class AuthConfig(BaseModel):
+    # HS256 shared secret. Unset = auth disabled.
+    secret: str | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.secret is not None
+
+
 class GatewayConfig(BaseModel):
     listen: ListenConfig = Field(default_factory=ListenConfig)
     upstream: UpstreamConfig
     policy: PolicyConfig
     audit: AuditConfig = Field(default_factory=AuditConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
 
 def load_policy() -> PolicyConfig:
@@ -55,6 +65,11 @@ def load_policy() -> PolicyConfig:
         raise ValueError(f"Invalid policy configuration in {POLICY_PATH}:\n{exc}") from exc
 
 
+def _load_auth_config() -> AuthConfig:
+    secret = os.environ.get("GATEWAY_JWT_SECRET", "").strip() or None
+    return AuthConfig(secret=secret)
+
+
 def load_config() -> GatewayConfig:
     """Load and validate gateway config."""
     upstream_url = os.environ.get("GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8000/mcp")
@@ -65,6 +80,7 @@ def load_config() -> GatewayConfig:
             upstream=UpstreamConfig(url=upstream_url),
             policy=load_policy(),
             audit=AuditConfig(db_path=audit_db_path),
+            auth=_load_auth_config(),
         )
     except ValidationError as exc:
         raise ValueError(f"Invalid gateway configuration:\n{exc}") from exc

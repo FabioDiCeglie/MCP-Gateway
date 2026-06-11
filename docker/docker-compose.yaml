@@ -65,6 +65,9 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    env_file:
+      - path: ../.env
+        required: false
     command: ["uv", "run", "mcp-client", "--url", "http://gateway:8080/mcp"]
     depends_on:
       gateway:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import httpx
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 
 from config import GatewayConfig
+from deps import authenticate
 from services.audit import AuditService
 from services.mcp import MCPService
 from services.tools_policy import ToolsPolicyService
@@ -18,11 +19,15 @@ MCP_PROXY_METHODS = ["GET", "POST", "DELETE"]
     "/mcp",
     methods=MCP_PROXY_METHODS,
     responses={
+        401: {"description": "Unauthorized — missing or invalid JWT"},
         502: {"description": "Bad gateway — upstream unreachable"},
         504: {"description": "Gateway timeout — upstream did not respond in time"},
     },
 )
-async def proxy_mcp(request: Request) -> Response:
+async def proxy_mcp(
+    request: Request,
+    client_identity: str | None = Depends(authenticate),
+) -> Response:
     config: GatewayConfig = request.app.state.config
     client: httpx.AsyncClient = request.app.state.http_client
     audit_service: AuditService = request.app.state.audit_service
@@ -38,6 +43,7 @@ async def proxy_mcp(request: Request) -> Response:
         method=request.method,
         headers=request.headers,
         body=await request.body(),
+        client_identity=client_identity,
     )
 
     if result.stream is not None:

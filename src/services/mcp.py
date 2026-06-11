@@ -50,6 +50,8 @@ class MCPService:
         method: str,
         headers: Mapping[str, str],
         body: bytes,
+        *,
+        client_identity: str | None = None,
     ) -> ProxyResult:
         tool_call: ToolCall | None = None
         if method == "POST" and body:
@@ -61,6 +63,7 @@ class MCPService:
                         tool_name=tool_call.tool_name,
                         request_id=tool_call.request_id,
                         outcome="denied",
+                        client_identity=client_identity,
                     )
                     return ProxyResult(
                         status_code=denial.status_code,
@@ -85,6 +88,7 @@ class MCPService:
                     request_id=tool_call.request_id,
                     outcome="allowed",
                     started_at=started_at,
+                    client_identity=client_identity,
                 )
             return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
         except httpx.RequestError:
@@ -94,6 +98,7 @@ class MCPService:
                     request_id=tool_call.request_id,
                     outcome="allowed",
                     started_at=started_at,
+                    client_identity=client_identity,
                 )
             return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
 
@@ -103,6 +108,7 @@ class MCPService:
                 request_id=tool_call.request_id,
                 outcome="allowed",
                 started_at=started_at,
+                client_identity=client_identity,
             )
 
         response_headers = self._forward_response_headers(upstream_response.headers)

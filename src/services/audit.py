@@ -139,6 +139,7 @@ class AuditService:
         request_id: Any,
         outcome: AuditOutcome,
         started_at: float | None = None,
+        client_identity: str | None = None,
     ) -> None:
         latency_ms = 0
         if outcome == "allowed" and started_at is not None:
@@ -149,6 +150,7 @@ class AuditService:
             outcome=outcome,
             latency_ms=latency_ms,
             request_id=request_id,
+            client_identity=client_identity,
         )
 
     def _open_sqlite(self) -> None:

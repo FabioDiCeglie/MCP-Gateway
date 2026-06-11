@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from config import POLICY_PATH, load_config
 from routes import health_router, mcp_router
 from services.audit import AuditService
+from services.auth import AuthService
 
 
 @asynccontextmanager
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     audit_service = AuditService(config.audit.db_path)
     audit_service.open()
     app.state.audit_service = audit_service
+    app.state.auth_service = AuthService(config.auth)
 
     async with httpx.AsyncClient(follow_redirects=False) as client:
         app.state.http_client = client
@@ -41,10 +43,11 @@ def main() -> None:
     app.state.config = config
 
     allowed = ", ".join(config.policy.tools_allowed) or "(none)"
+    auth_status = "JWT HS256" if config.auth.enabled else "disabled"
     print(
         f"Listening on {config.listen.host}:{config.listen.port} → {config.upstream.url} "
         f"(policy: {POLICY_PATH}, tools allowed: {allowed}, "
-        f"audit: {config.audit.db_path})"
+        f"audit: {config.audit.db_path}, auth: {auth_status})"
     )
     uvicorn.run(app, host=config.listen.host, port=config.listen.port)
 
