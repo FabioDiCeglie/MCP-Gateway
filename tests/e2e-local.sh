@@ -5,18 +5,46 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT}/docker/docker-compose.yaml"
 GATEWAY_HEALTH_URL="http://127.0.0.1:8080/health"
+GATEWAY_MCP_URL="http://127.0.0.1:8080/mcp"
 LOG_DIR="${ROOT}/tests/.logs"
 MAX_WAIT_SECONDS=60
+EXPECTED_CLIENT_IDENTITY="smoke-client"
+
+if [[ ! -f "${ROOT}/.env" ]]; then
+  echo "❌  .env not found — copy .env.example to .env" >&2
+  exit 1
+fi
+set -a
+# shellcheck disable=SC1091
+source "${ROOT}/.env"
+set +a
+
+if [[ -z "${GATEWAY_JWT_SECRET:-}" ]]; then
+  echo "❌  GATEWAY_JWT_SECRET is not set in .env" >&2
+  exit 1
+fi
 
 SERVER_PID=""
 GATEWAY_PID=""
 
+section() {
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  $1"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+step() {
+  echo
+  echo "▶ $1"
+}
+
 ok() {
-  echo "    OK  $*"
+  echo "  ✅  $*"
 }
 
 fail() {
-  echo "    FAIL  $*" >&2
+  echo "  ❌  $*" >&2
 }
 
 kill_port() {
@@ -42,7 +70,7 @@ wait_for_port() {
   until lsof -ti ":${port}" >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
       fail "${label} did not start on port ${port} within ${MAX_WAIT_SECONDS}s"
-      echo "        see ${LOG_DIR}/${label}.log" >&2
+      echo "      see ${LOG_DIR}/${label}.log" >&2
       return 1
     fi
     sleep 1
@@ -55,7 +83,7 @@ wait_for_health() {
   until curl -sf "${GATEWAY_HEALTH_URL}" >/dev/null; do
     if (( SECONDS >= deadline )); then
       fail "gateway health check timed out after ${MAX_WAIT_SECONDS}s"
-      echo "        see ${LOG_DIR}/mcp-gateway.log" >&2
+      echo "      see ${LOG_DIR}/mcp-gateway.log" >&2
       return 1
     fi
     sleep 1
@@ -66,17 +94,20 @@ print_pass() {
   local client_output="$1"
 
   echo
-  echo "========================================"
-  echo "  E2E LOCAL PASSED"
-  echo "========================================"
-  echo "  flow:   client → gateway (:8080) → server (:8000)"
-  echo "  health: ${GATEWAY_HEALTH_URL}"
-  echo "  client: $(grep '^Connected to' <<<"${client_output}")"
-  echo "  tools:  $(grep '^Tools:' <<<"${client_output}" | cut -d' ' -f2-)"
-  echo "========================================"
-  echo "  server logs:  ${LOG_DIR}/mcp-server.log"
-  echo "  gateway logs: ${LOG_DIR}/mcp-gateway.log"
-  echo "========================================"
+  echo "╔════════════════════════════════════════╗"
+  echo "║  🎉  E2E LOCAL PASSED                  ║"
+  echo "╚════════════════════════════════════════╝"
+  echo
+  echo "  Flow      client → gateway (:8080) → server (:8000)"
+  echo "  Health    ${GATEWAY_HEALTH_URL}"
+  echo "  Auth      🔐 JWT HS256 (from .env)"
+  echo "  Identity  ${EXPECTED_CLIENT_IDENTITY}"
+  echo "  Client    $(grep '^Connected to' <<<"${client_output}")"
+  echo "  Tools     $(grep '^Tools:' <<<"${client_output}" | cut -d' ' -f2-)"
+  echo
+  echo "  Logs"
+  echo "    server   ${LOG_DIR}/mcp-server.log"
+  echo "    gateway  ${LOG_DIR}/mcp-gateway.log"
 }
 
 trap cleanup EXIT
@@ -84,65 +115,82 @@ trap cleanup EXIT
 cd "${ROOT}"
 mkdir -p "${LOG_DIR}"
 
-echo
-echo "==> E2E local smoke test"
-echo
+section "🧪  E2E local smoke test"
 
-echo "==> Syncing dependencies"
+section "🔧  Setup"
+step "Syncing dependencies"
 uv sync --reinstall-package mcp-gateway --quiet
 ok "dependencies synced"
 
-echo "==> Cleaning Docker stack"
+step "Cleaning Docker stack"
 docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans 2>/dev/null || true
 ok "docker stack cleaned"
 
-echo "==> Stopping local processes on :8000 and :8080"
+step "Clearing ports :8000 and :8080"
 kill_port 8000
 kill_port 8080
 ok "ports cleared"
 
-echo "==> Starting mcp-server (:8000)"
+section "🚀  Stack"
+step "Starting mcp-server (:8000)"
 uv run mcp-server >"${LOG_DIR}/mcp-server.log" 2>&1 &
 SERVER_PID=$!
 wait_for_port 8000 "mcp-server"
-ok "mcp-server listening on :8000"
+ok "mcp-server listening"
 
-echo "==> Starting mcp-gateway (:8080)"
+step "Starting mcp-gateway (:8080)"
 rm -f "${ROOT}/data/audit.db"
 uv run mcp-gateway >"${LOG_DIR}/mcp-gateway.log" 2>&1 &
 GATEWAY_PID=$!
 wait_for_health
-ok "mcp-gateway healthy at ${GATEWAY_HEALTH_URL}"
+ok "mcp-gateway healthy"
 
-echo "==> Running mcp-client through gateway"
+section "🔐  Auth (JWT)"
+echo "  secret     loaded from .env"
+echo "  identity   ${EXPECTED_CLIENT_IDENTITY}  (JWT sub → audit client_identity)"
+
+step "Reject — no Bearer token"
+unauth_status="$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "${GATEWAY_MCP_URL}" \
+  -H 'Content-Type: application/json' \
+  -d '{}')"
+if [[ "${unauth_status}" != "401" ]]; then
+  fail "POST /mcp without token → expected 401, got ${unauth_status}"
+  exit 1
+fi
+ok "POST /mcp without token → 401 Unauthorized"
+
+step "Accept — valid JWT from mcp-client"
 output="$(uv run mcp-client 2>&1)"
-echo "${output}" | sed 's/^/    /'
+echo "${output}" | sed 's/^/      /'
 
 if ! grep -q "Tools: echo, ping" <<<"${output}"; then
-  fail "expected tools 'echo, ping' in client output"
+  fail "authenticated client did not receive tools/list"
   exit 1
 fi
-ok "client received tools/list via gateway"
+ok "JWT accepted — authenticated as ${EXPECTED_CLIENT_IDENTITY}"
+ok "tools/list succeeded"
 
+section "🛡️  Policy"
 if ! grep -q "echo: hello" <<<"${output}"; then
-  fail "expected allowed echo call to succeed"
+  fail "allowed echo call did not succeed"
   exit 1
 fi
-ok "allowed tool call passed through gateway"
+ok "echo allowed → proxied to upstream"
 
 if ! grep -q "ping: denied" <<<"${output}"; then
-  fail "expected denied ping call at gateway"
+  fail "denied ping call not blocked at gateway"
   exit 1
 fi
-ok "denied tool call blocked at gateway"
+ok "ping denied → blocked at gateway"
 
-echo "==> Checking audit log in SQLite"
+section "📋  Audit (SQLite)"
 audit_table="$(uv run python -c "
 import sqlite3
 from pathlib import Path
 
 conn = sqlite3.connect(Path('${ROOT}') / 'data' / 'audit.db')
-columns = ['id', 'timestamp', 'tool_name', 'outcome', 'latency_ms', 'request_id']
+columns = ['id', 'timestamp', 'tool_name', 'outcome', 'latency_ms', 'request_id', 'client_identity']
 rows = conn.execute(
     f\"SELECT {', '.join(columns)} FROM audit_events ORDER BY id\"
 ).fetchall()
@@ -165,27 +213,27 @@ lines = [
 ]
 print('\n'.join(lines))
 ")"
-echo "${audit_table}" | sed 's/^/    /'
+echo "${audit_table}" | sed 's/^/      /'
 
 audit_rows="$(uv run python -c "
 import sqlite3
 conn = sqlite3.connect('${ROOT}/data/audit.db')
-for tool_name, outcome in conn.execute(
-    'SELECT tool_name, outcome FROM audit_events ORDER BY id'
+for tool_name, outcome, client_identity in conn.execute(
+    'SELECT tool_name, outcome, client_identity FROM audit_events ORDER BY id'
 ):
-    print(f'{tool_name}|{outcome}')
+    print(f'{tool_name}|{outcome}|{client_identity}')
 ")"
 
-if ! grep -q "^echo|allowed$" <<<"${audit_rows}"; then
-  fail "expected audit row: echo|allowed"
+if ! grep -q "^echo|allowed|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; then
+  fail "expected echo|allowed|${EXPECTED_CLIENT_IDENTITY}"
   exit 1
 fi
-ok "audit logged allowed echo call"
+ok "echo|allowed|${EXPECTED_CLIENT_IDENTITY}"
 
-if ! grep -q "^ping|denied$" <<<"${audit_rows}"; then
-  fail "expected audit row: ping|denied"
+if ! grep -q "^ping|denied|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; then
+  fail "expected ping|denied|${EXPECTED_CLIENT_IDENTITY}"
   exit 1
 fi
-ok "audit logged denied ping call"
+ok "ping|denied|${EXPECTED_CLIENT_IDENTITY}"
 
 print_pass "${output}"
