@@ -24,7 +24,7 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         │
                         ├─ Policy engine (allow/deny tools — M3)
                         ├─ Audit log (what happened — M4; who — M5 fills `client_identity`)
-                        ├─ Auth (API keys — M5; identity → audit)
+                        ├─ Auth (JWT HS256 — M5; `sub` → audit `client_identity`)
                         └─ Tracing (OpenTelemetry — M6)
 ```
 
@@ -135,7 +135,7 @@ One path for everything:
 | M2 | Pass-through proxy | [x] |
 | M3 | Tool policy | [x] |
 | M4 | Audit log | [x] |
-| M5 | Auth + `client_identity` in audit | [ ] |
+| M5 | Auth + `client_identity` in audit | [x] |
 | M6 | Observability | [ ] |
 
 ### M0 — Repo
@@ -209,16 +209,18 @@ Durable record of what happened — for debugging and compliance.
 
 ### M5 — Auth
 
-Lock down ingress — only known clients reach upstream. **Completes the audit story:** M4 reserved `client_identity`; M5 fills it from the authenticated client.
+Lock down ingress — only authenticated clients reach upstream. **Completes the audit story:** M4 reserved `client_identity`; M5 fills it from the JWT `sub` claim.
 
-- API key via header (e.g. `Authorization: Bearer <key>` or `X-API-Key`)
-- Reject unauthenticated requests with 401 before proxy / policy / audit on protected routes
-- Valid keys pass through; resolved key identity (e.g. key id or label from config) passed into `AuditService.record_tool_call(..., client_identity=...)`
+- JWT via `Authorization: Bearer <token>` — HS256 shared secret (`GATEWAY_JWT_SECRET`); unset = auth disabled (local dev)
+- `deps/authenticate` on `/mcp` — 401 before proxy / policy / audit when auth enabled
+- Valid token → `sub` passed into `AuditService.record_tool_call(..., client_identity=...)`; `Authorization` forwarded to upstream
 - Every audited `tools/call` row includes **who** called it — not just what and when
-- Compose: API keys via env / `.env` (gitignored); smoke-test client passes key from same source
-- E2E: extend smoke test to assert `client_identity` is set in audit rows (SQLite local, Postgres docker)
+- Compose: `GATEWAY_JWT_SECRET` via `.env` (gitignored); `mcp-client` auto-signs for smoke tests (production: token from `/login` or IdP)
+- E2E: 401 without token; `client_identity` in audit (SQLite local, Postgres docker)
 
-**Done when:** request without key → 401; valid key → full proxy flow works via compose; audit query shows `client_identity` populated for allowed and denied tool calls.
+**Done:** [x]
+
+**Done when:** request without token → 401; valid JWT → full proxy flow works via compose; audit query shows `client_identity` populated for allowed and denied tool calls.
 
 ### M6 — Observability
 
