@@ -15,6 +15,31 @@ Agents and apps call MCP tools directly with little governance:
 
 This project is a **control-plane gateway** — a single choke point between MCP clients and MCP servers. It is not an agent framework.
 
+### Design principles
+
+1. **One insertion point** — all client traffic goes through the gateway; no bypass paths
+2. **Transport first** — forward by default; parse JSON-RPC only where control is needed (e.g. `tools/call`)
+3. **Config over code** — upstream, policy, and secrets live in env/files
+4. **Test the wire** — every capability has an e2e smoke test (`tests/e2e-local.sh`, `tests/e2e-docker.sh`)
+
+---
+
+## Transport: Streamable HTTP
+
+The gateway sits between clients and upstream MCP servers on a single `/mcp` endpoint. One client run is not a single HTTP call — Streamable HTTP opens a session, streams on a GET, sends RPCs over POST, then closes with DELETE:
+
+| Call | Why |
+|------|-----|
+| `POST /mcp` 200 | `initialize` |
+| `POST /mcp` 202 | Session created (`Mcp-Session-Id`) |
+| `GET /mcp` 200 | SSE stream — server can push messages on that connection |
+| `POST /mcp` 200 | `tools/list`, `tools/call`, … |
+| `DELETE /mcp` 200 | Client closes the session |
+
+Allowed traffic shows the same pattern on `:8080` (gateway) and `:8000` (upstream). Flow: **client → gateway → server**.
+
+MCP-relevant headers (`Mcp-Session-Id`, `Accept`, `Content-Type`, …) are forwarded; hop-by-hop headers are stripped. SSE responses are streamed without buffering the full body.
+
 ---
 
 ## Architecture
@@ -24,11 +49,13 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         │
                         ├─ Tool policy (allow/deny tools)
                         ├─ Audit log (who called what, when)
-                        ├─ Auth (API keys / OAuth)
+                        ├─ Auth (JWT HS256)
                         └─ Tracing (OpenTelemetry)
 ```
 
-**Working in progress**: Auth and tracing will get their own sections and diagrams as they land.
+**Working in progress**: Tracing will get its own section later.
+
+---
 
 ### Tool policy + audit
 
@@ -76,7 +103,7 @@ Append-only record of every `tools/call` — for debugging and compliance.
 | `outcome` | `allowed` or `denied` |
 | `latency_ms` | Upstream round-trip for allowed calls; `0` for denials |
 | `request_id` | JSON-RPC `id` |
-| `client_identity` | Reserved for M5 (auth) — `NULL` for now |
+| `client_identity` | JWT `sub` claim from authenticated client; `NULL` when auth disabled |
 
 Denied calls are logged **before** the policy error is returned. Allowed calls are logged after the upstream responds (or times out).
 
@@ -90,24 +117,6 @@ Configured via `GATEWAY_AUDIT_DB_PATH`:
 | Docker Compose | `postgresql://…@postgres:5432/audit` | Postgres service |
 
 Postgres credentials live in `.env` (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`). Compose builds the gateway URL from those vars.
-
----
-
-## Transport: Streamable HTTP
-
-The gateway sits between clients and upstream MCP servers on a single `/mcp` endpoint. One client run is not a single HTTP call — Streamable HTTP opens a session, streams on a GET, sends RPCs over POST, then closes with DELETE:
-
-| Call | Why |
-|------|-----|
-| `POST /mcp` 200 | `initialize` |
-| `POST /mcp` 202 | Session created (`Mcp-Session-Id`) |
-| `GET /mcp` 200 | SSE stream — server can push messages on that connection |
-| `POST /mcp` 200 | `tools/list`, `tools/call`, … |
-| `DELETE /mcp` 200 | Client closes the session |
-
-Allowed traffic shows the same pattern on `:8080` (gateway) and `:8000` (upstream). Flow: **client → gateway → server**.
-
-MCP-relevant headers (`Mcp-Session-Id`, `Accept`, `Content-Type`, …) are forwarded; hop-by-hop headers are stripped. SSE responses are streamed without buffering the full body.
 
 ---
 
@@ -154,9 +163,69 @@ Denied calls return **HTTP 200** with a JSON-RPC error body:
 
 ---
 
-## Design principles
+## Auth (JWT)
 
-1. **One insertion point** — no bypass paths around the gateway
-2. **Transport first, semantics later** — forward bytes by default; parse JSON-RPC only where control is needed
-3. **Config over code** — upstream and policy in env/files, not hard-coded
-4. **Test the wire** — every capability ships with an e2e smoke test (`./tests/e2e-local.sh`, `./tests/e2e-docker.sh`)
+Ingress authentication on `/mcp` only. `/health` stays public.
+
+### Config
+
+| Variable | Description |
+|----------|-------------|
+| `GATEWAY_JWT_SECRET` | HS256 shared secret. Unset = auth disabled. |
+
+### Flow
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant R as routes/mcp.py
+    participant J as AuthService
+    participant P as MCPService
+    participant S as MCP Server
+
+    C->>R: POST /mcp + Authorization: Bearer jwt
+    R->>J: authenticate(authorization)
+
+    alt valid JWT
+        J-->>R: sub (client_identity)
+        R->>P: proxy(..., client_identity)
+        P->>S: forward (Authorization included)
+        S-->>P: response
+        P-->>C: HTTP 200
+        Note over P: tools/call → audit logs client_identity
+    else missing or invalid JWT
+        J-->>R: None
+        R-->>C: 401 Unauthorized
+        Note over P,S: proxy never runs
+    end
+```
+
+Identity comes from the JWT `sub` claim — not from a client-supplied header. The gateway validates; it does not issue tokens. When `GATEWAY_JWT_SECRET` is unset, `authenticate` is a no-op and all requests pass through without identity.
+
+### What we ship today (local approach)
+
+Current auth is a **dev/local shortcut only**:
+
+- One HS256 shared secret (`GATEWAY_JWT_SECRET`) — gateway validates, smoke client signs
+- `mcp-client` auto-signs a JWT with a stand-in `CLIENT` object (`sub: smoke-client`)
+- No `/login` route, no IdP integration, no token refresh
+
+This is **not** a production auth setup.
+
+### Production target (not implemented yet)
+
+| Piece | Production approach |
+|-------|---------------------|
+| **Who signs?** | `/login` route or external IdP (Auth0, Keycloak, …) — not the MCP client |
+| **Who validates?** | Gateway only — same `sub` → `client_identity` flow as today |
+| **Secret** | Client never holds the signing secret; it only sends a token it received |
+
+Secret rotation changes the key, not `sub` — audit identity stays stable.
+
+### Denial
+
+Missing or invalid token → **HTTP 401** before policy or audit run:
+
+```json
+{ "detail": "Unauthorized" }
+```
