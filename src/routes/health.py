@@ -6,12 +6,10 @@ from config import GatewayConfig
 
 router = APIRouter()
 
-HEALTH_METHODS = ["GET"]
-
 
 @router.api_route(
     "/health",
-    methods=HEALTH_METHODS,
+    methods=["GET"],
     responses={
         503: {"description": "Service unavailable — gateway not ready"},
         500: {"description": "Internal server error"},
