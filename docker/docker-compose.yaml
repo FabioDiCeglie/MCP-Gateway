@@ -26,6 +26,13 @@ services:
       timeout: 3s
       retries: 15
 
+  jaeger:
+    container_name: jaeger
+    image: jaegertracing/all-in-one:1.64
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
   gateway:
     container_name: mcp-gateway
     build:
@@ -37,6 +44,7 @@ services:
     environment:
       GATEWAY_UPSTREAM_URL: http://mcp-server:8000/mcp
       GATEWAY_AUDIT_DB_PATH: postgresql://${POSTGRES_USER:-gateway}:${POSTGRES_PASSWORD:-gateway}@postgres:5432/${POSTGRES_DB:-audit}
+      GATEWAY_OTEL_EXPORTER_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8080:8080"
     volumes:
@@ -47,6 +55,8 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     healthcheck:
       test:
         [
