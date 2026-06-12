@@ -48,8 +48,6 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         └─ Tracing (OpenTelemetry)
 ```
 
-**Working in progress**: Tracing will get its own section later.
-
 ---
 
 ## Tool policy
@@ -257,4 +255,80 @@ Missing or invalid token → **HTTP 401** before policy or audit run:
 ```json
 { "detail": "Unauthorized" }
 ```
+
+---
+
+## Tracing (OpenTelemetry)
+
+Distributed traces for every authenticated `/mcp` request — latency breakdown across the gateway layers. Spans export via OTLP HTTP when configured; unset endpoint = tracing disabled (no overhead).
+
+Auth failures (**401**) are **not** traced — `authenticate` runs before the route handler, so no `gateway.request` span is created.
+
+### Flow
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant R as routes/mcp.py
+    participant P as MCPService
+    participant T as TracingService
+    participant S as MCP Server
+    participant J as Jaeger
+
+    C->>R: POST /mcp (tools/call)
+    Note over R: after auth passes
+    R->>T: get_tracer()
+    R->>R: span gateway.request
+
+    alt tools/call
+        R->>P: proxy()
+        P->>P: span policy.check
+        alt tool allowed
+            P->>P: policy.outcome = allowed
+            P->>S: span upstream.call → forward
+            S-->>P: response
+            P-->>R: HTTP 200
+        else tool denied
+            P->>P: policy.outcome = denied
+            P-->>R: HTTP 200 + JSON-RPC error
+            Note over S: never called
+        end
+    else not tools/call
+        R->>P: proxy()
+        P->>S: span upstream.call → forward
+        S-->>P: response
+        P-->>R: HTTP 200
+    end
+
+    R->>J: export spans (OTLP, batched)
+```
+
+Each HTTP request to `/mcp` is one trace. `tools/call` adds `policy.check`; denied calls stop before `upstream.call`.
+
+### Config
+
+| Variable | Description |
+| -------- | ----------- |
+| `GATEWAY_OTEL_EXPORTER_ENDPOINT` | OTLP HTTP URL. Unset = tracing off. |
+| `GATEWAY_OTEL_SERVICE_NAME` | Service name on exported spans (default `mcp-gateway`). |
+
+`TracingService` starts in app lifespan (`start()` / `shutdown()`). Shutdown flushes batched spans on exit.
+
+### Spans
+
+Nested waterfall — one trace per `/mcp` HTTP request:
+
+```
+gateway.request          ← routes/mcp.py
+  ├─ policy.check        ← services/mcp.py (tools/call only)
+  └─ upstream.call       ← services/mcp.py (skipped when policy denies)
+```
+
+| Span | Attributes | When |
+| ---- | ---------- | ---- |
+| `gateway.request` | `http.method`, `http.route`, `client.identity`, `http.status_code` | Every authenticated `/mcp` request |
+| `policy.check` | `tool.name`, `policy.outcome` (`allowed` / `denied`) | `tools/call` POST only |
+| `upstream.call` | `upstream.url`, `http.status_code` | Request reaches upstream (502/504 on failure) |
+
+**Why layered spans?** Each span answers one question: how long at the HTTP boundary (`gateway.request`), was policy involved (`policy.check`), how slow was upstream (`upstream.call`).
 
