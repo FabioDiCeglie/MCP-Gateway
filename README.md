@@ -70,7 +70,7 @@ Compose overrides `GATEWAY_UPSTREAM_URL`, `GATEWAY_AUDIT_DB_PATH`, and `GATEWAY_
 ./tests/e2e-docker.sh
 ```
 
-CI runs `./tests/e2e-docker.sh` on every pull request (see [`.github/workflows/e2e.yml`](./.github/workflows/e2e.yml)).
+CI runs unit tests (`uv run pytest`) and `./tests/e2e-docker.sh` on every pull request (see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)).
 
 ## Project layout
 

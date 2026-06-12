@@ -49,3 +49,12 @@ only-include = ["src/main.py", "src/config.py", "src/deps", "src/routes", "src/s
 
 [tool.uv]
 package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests/unit"]
