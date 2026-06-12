@@ -36,12 +36,23 @@ class AuthConfig(BaseModel):
         return self.secret is not None
 
 
+class TracingConfig(BaseModel):
+    # OTLP HTTP endpoint, e.g. http://jaeger:4318/v1/traces. Unset = tracing disabled.
+    exporter_endpoint: str | None = None
+    service_name: str = "mcp-gateway"
+
+    @property
+    def enabled(self) -> bool:
+        return self.exporter_endpoint is not None
+
+
 class GatewayConfig(BaseModel):
     listen: ListenConfig = Field(default_factory=ListenConfig)
     upstream: UpstreamConfig
     policy: PolicyConfig
     audit: AuditConfig = Field(default_factory=AuditConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
 
 
 def load_policy() -> PolicyConfig:
@@ -70,6 +81,12 @@ def _load_auth_config() -> AuthConfig:
     return AuthConfig(secret=secret)
 
 
+def _load_tracing_config() -> TracingConfig:
+    endpoint = os.environ.get("GATEWAY_OTEL_EXPORTER_ENDPOINT", "").strip() or None
+    service_name = os.environ.get("GATEWAY_OTEL_SERVICE_NAME", "mcp-gateway").strip()
+    return TracingConfig(exporter_endpoint=endpoint, service_name=service_name)
+
+
 def load_config() -> GatewayConfig:
     """Load and validate gateway config."""
     upstream_url = os.environ.get("GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8000/mcp")
@@ -81,6 +98,7 @@ def load_config() -> GatewayConfig:
             policy=load_policy(),
             audit=AuditConfig(db_path=audit_db_path),
             auth=_load_auth_config(),
+            tracing=_load_tracing_config(),
         )
     except ValidationError as exc:
         raise ValueError(f"Invalid gateway configuration:\n{exc}") from exc

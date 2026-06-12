@@ -13,6 +13,9 @@ dependencies = [
     "uvicorn>=0.34",
     "psycopg[binary]>=3.2",
     "pyjwt[crypto]>=2.10",
+    "opentelemetry-api>=1.29",
+    "opentelemetry-sdk>=1.29",
+    "opentelemetry-exporter-otlp-proto-http>=1.29",
 ]
 
 [project.scripts]
