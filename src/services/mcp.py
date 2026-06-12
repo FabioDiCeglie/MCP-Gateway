@@ -5,9 +5,12 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
 import httpx
+from opentelemetry import trace
 
 from services.audit import AuditService
 from services.tools_policy import ToolCall, ToolsPolicyService
+
+_tracer = trace.get_tracer(__name__)
 
 HOP_BY_HOP_HEADERS = frozenset(
     {
@@ -57,19 +60,23 @@ class MCPService:
         if method == "POST" and body:
             tool_call = ToolsPolicyService.parse_tool_call(body)
             if tool_call is not None:
-                denial = self._tools_policy.check_post(body)
-                if denial is not None:
-                    self._audit.record_tool_call(
-                        tool_name=tool_call.tool_name,
-                        request_id=tool_call.request_id,
-                        outcome="denied",
-                        client_identity=client_identity,
-                    )
-                    return ProxyResult(
-                        status_code=denial.status_code,
-                        headers=denial.headers,
-                        body=denial.body,
-                    )
+                with _tracer.start_as_current_span("policy.check") as span:
+                    span.set_attribute("tool.name", tool_call.tool_name)
+                    denial = self._tools_policy.check_post(body)
+                    if denial is not None:
+                        span.set_attribute("policy.outcome", "denied")
+                        self._audit.record_tool_call(
+                            tool_name=tool_call.tool_name,
+                            request_id=tool_call.request_id,
+                            outcome="denied",
+                            client_identity=client_identity,
+                        )
+                        return ProxyResult(
+                            status_code=denial.status_code,
+                            headers=denial.headers,
+                            body=denial.body,
+                        )
+                    span.set_attribute("policy.outcome", "allowed")
 
         started_at = time.perf_counter() if tool_call is not None else None
 
@@ -79,28 +86,34 @@ class MCPService:
             headers=self._forward_request_headers(headers),
             content=body,
         )
-        try:
-            upstream_response = await self._client.send(upstream_request, stream=True)
-        except httpx.TimeoutException:
-            if tool_call is not None:
-                self._audit.record_tool_call(
-                    tool_name=tool_call.tool_name,
-                    request_id=tool_call.request_id,
-                    outcome="allowed",
-                    started_at=started_at,
-                    client_identity=client_identity,
-                )
-            return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
-        except httpx.RequestError:
-            if tool_call is not None:
-                self._audit.record_tool_call(
-                    tool_name=tool_call.tool_name,
-                    request_id=tool_call.request_id,
-                    outcome="allowed",
-                    started_at=started_at,
-                    client_identity=client_identity,
-                )
-            return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
+        with _tracer.start_as_current_span("upstream.call") as span:
+            span.set_attribute("upstream.url", self._upstream_url)
+            try:
+                upstream_response = await self._client.send(upstream_request, stream=True)
+            except httpx.TimeoutException:
+                span.set_attribute("http.status_code", 504)
+                if tool_call is not None:
+                    self._audit.record_tool_call(
+                        tool_name=tool_call.tool_name,
+                        request_id=tool_call.request_id,
+                        outcome="allowed",
+                        started_at=started_at,
+                        client_identity=client_identity,
+                    )
+                return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
+            except httpx.RequestError:
+                span.set_attribute("http.status_code", 502)
+                if tool_call is not None:
+                    self._audit.record_tool_call(
+                        tool_name=tool_call.tool_name,
+                        request_id=tool_call.request_id,
+                        outcome="allowed",
+                        started_at=started_at,
+                        client_identity=client_identity,
+                    )
+                return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
+
+            span.set_attribute("http.status_code", upstream_response.status_code)
 
         if tool_call is not None:
             self._audit.record_tool_call(
