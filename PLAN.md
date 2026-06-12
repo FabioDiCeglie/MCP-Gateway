@@ -136,7 +136,7 @@ One path for everything:
 | M3 | Tool policy | [x] |
 | M4 | Audit log | [x] |
 | M5 | Auth + `client_identity` in audit | [x] |
-| M6 | Observability | [ ] |
+| M6 | Observability | [x] |
 
 ### M0 — Repo
 
@@ -226,12 +226,15 @@ Lock down ingress — only authenticated clients reach upstream. **Completes the
 
 Make the gateway operable in production.
 
-- Extend `GET /health` — liveness/readiness (upstream reachability) for orchestrators
+- `GET /health` — liveness (`status` + configured upstream URL; always 200 when the process is up)
 - OpenTelemetry spans: `gateway.request`, `upstream.call`, `policy.check`
-- `docs/runbook.md`: config reference, `uv run` + compose quick start, deploy notes, common failures
-- Compose: add `jaeger` (or `otel-collector`) service; gateway exporter endpoint via env
+- `TracingService` + `GATEWAY_OTEL_*` env; unset = tracing disabled
+- Compose: `jaeger` service; gateway exports OTLP HTTP via env (compose overrides endpoint for the Docker network)
+- E2E: span verification in Jaeger (`e2e-local.sh`, `e2e-docker.sh`); interactive prompt to inspect traces before cleanup
 
-**Done when:** `docker compose up` shows traces in Jaeger UI; runbook documents the full compose stack (gateway, upstream, audit volume, tracing).
+**Done:** [x]
+
+**Done when:** e2e scripts verify `gateway.request`, `policy.check`, and `upstream.call` in Jaeger UI; `./tests/e2e-docker.sh` leaves the stack up on demand so traces can be inspected at `:16686`.
 
 ---
 

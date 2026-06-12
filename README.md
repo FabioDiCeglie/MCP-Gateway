@@ -4,6 +4,8 @@ A control plane between MCP clients and MCP servers — auth, policy, audit, and
 
 See [DOCS.md](./DOCS.md) for architecture and design decisions.
 
+Copy [`.env.example`](./.env.example) to `.env` before running tests or Docker Compose.
+
 ## Local running
 
 All commands from the repo root:
@@ -16,6 +18,14 @@ All commands from the repo root:
 
 Start server and gateway in separate terminals, then run the client when ready.
 
+For tracing locally, set `GATEWAY_OTEL_EXPORTER_ENDPOINT` in `.env` (see `.env.example`) and run Jaeger:
+
+```bash
+docker compose -f docker/docker-compose.yaml up -d jaeger
+```
+
+Jaeger UI: http://localhost:16686
+
 ## E2E tests
 
 **Manual** — three terminals:
@@ -26,7 +36,7 @@ uv run mcp-gateway
 uv run mcp-client
 ```
 
-**Automated (local)** — cleans docker + local processes, starts server and gateway, runs the client, prints pass/fail and the audit log table:
+**Automated (local)** — cleans processes, starts Jaeger (if tracing enabled in `.env`), server and gateway via `uv run`, runs the client, prints pass/fail, audit log, and Jaeger span checks:
 
 ```bash
 ./tests/e2e-local.sh
@@ -42,7 +52,9 @@ ping: denied (...)
 
 `echo` is allowed; `ping` is not in `policy.yaml`.
 
-**Docker** — starts server, gateway, and client. The client runs once after the gateway is healthy, then exits.
+When tracing is enabled, the script prompts before stopping Jaeger so you can inspect traces in the UI.
+
+**Docker** — full stack: `mcp-server`, gateway, Postgres, Jaeger, smoke client.
 
 ```bash
 cd docker
@@ -50,9 +62,9 @@ docker compose build
 docker compose up -d
 ```
 
-Compose overrides `GATEWAY_UPSTREAM_URL` so the gateway reaches `mcp-server` on the Docker network, and bind-mounts `policy.yaml` into the gateway container.
+Compose overrides `GATEWAY_UPSTREAM_URL`, `GATEWAY_AUDIT_DB_PATH`, and `GATEWAY_OTEL_EXPORTER_ENDPOINT` for the Docker network. Other vars come from `.env`.
 
-**Automated (docker):** same checks; prints the audit log table from Postgres.
+**Automated (docker):** same checks as local; audit from Postgres; Jaeger span verification; prompts before cleanup:
 
 ```bash
 ./tests/e2e-docker.sh
@@ -64,16 +76,20 @@ Compose overrides `GATEWAY_UPSTREAM_URL` so the gateway reaches `mcp-server` on 
 src/
   config.py           # GatewayConfig, policy loading
   main.py             # FastAPI app + entrypoint
+  deps/
+    auth.py           # authenticate dependency (JWT)
   routes/
     mcp.py            # /mcp proxy route
     health.py         # GET /health
   services/
-    mcp.py            # MCPService — upstream proxy + audit hook
+    mcp.py            # MCPService — proxy, policy, audit, trace spans
     tools_policy.py   # ToolsPolicyService — tools/call allow-list
     audit.py          # AuditService — append-only tool call log
+    auth.py           # AuthService — JWT validation
+    tracing.py        # TracingService — OpenTelemetry bootstrap
 policy.yaml           # Tool policy (tools_allowed)
 mcp-server/           # Demo upstream (echo, ping)
 mcp-client/           # Smoke-test client
-docker/               # Dockerfile + compose stack
+docker/               # Dockerfile, compose stack, Jaeger UI config
 tests/                # e2e-local.sh, e2e-docker.sh
 ```
