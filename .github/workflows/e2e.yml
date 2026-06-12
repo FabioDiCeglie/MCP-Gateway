@@ -1,0 +1,23 @@
+name: E2E
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  e2e-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from example
+        run: cp .env.example .env
+
+      - name: Run docker e2e smoke test
+        run: ./tests/e2e-docker.sh
+
+      - name: Cleanup Docker stack
+        if: always()
+        working-directory: docker
+        run: docker compose down -v --remove-orphans

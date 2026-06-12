@@ -190,6 +190,8 @@ First control-plane feature — decide which tools may run before they hit upstr
 - Everything else (`initialize`, `tools/list`, resources, etc.) still pass-through
 - Mount `policy.yaml` in compose so policy changes don't require image rebuild
 
+**Done:** [x]
+
 **Done when:** calling a denied tool fails at the gateway; allowed tools still work end-to-end via compose smoke test.
 
 ### M4 — Audit log

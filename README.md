@@ -64,11 +64,13 @@ docker compose up -d
 
 Compose overrides `GATEWAY_UPSTREAM_URL`, `GATEWAY_AUDIT_DB_PATH`, and `GATEWAY_OTEL_EXPORTER_ENDPOINT` for the Docker network. Other vars come from `.env`.
 
-**Automated (docker):** same checks as local; audit from Postgres; Jaeger span verification; prompts before cleanup:
+**Automated (docker):** same checks as local; audit from Postgres; Jaeger span verification; prompts before cleanup when run interactively:
 
 ```bash
 ./tests/e2e-docker.sh
 ```
+
+CI runs `./tests/e2e-docker.sh` on every pull request (see [`.github/workflows/e2e.yml`](./.github/workflows/e2e.yml)).
 
 ## Project layout
 
