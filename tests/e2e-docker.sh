@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT}/docker/docker-compose.yaml"
 GATEWAY_HEALTH_URL="http://127.0.0.1:8080/health"
 GATEWAY_MCP_URL="http://127.0.0.1:8080/mcp"
+JAEGER_UI_URL="http://127.0.0.1:16686"
 MAX_WAIT_SECONDS=60
 EXPECTED_CLIENT_IDENTITY="smoke-client"
 
@@ -17,6 +18,8 @@ set -a
 # shellcheck disable=SC1091
 source "${ROOT}/.env"
 set +a
+
+OTEL_SERVICE_NAME="${GATEWAY_OTEL_SERVICE_NAME:-mcp-gateway}"
 
 if [[ -z "${GATEWAY_JWT_SECRET:-}" ]]; then
   echo "❌  GATEWAY_JWT_SECRET is not set in .env" >&2
@@ -58,19 +61,27 @@ print_pass() {
   echo "  Client    $(grep '^Connected to' <<<"${client_output}")"
   echo "  Tools     $(grep '^Tools:' <<<"${client_output}" | cut -d' ' -f2-)"
   echo "  Audit     Postgres (docker)"
+  echo "  Tracing   Jaeger ${JAEGER_UI_URL} (service: ${OTEL_SERVICE_NAME})"
 }
 
 cleanup_docker() {
   docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
-cleanup_on_exit() {
+finish() {
   local exit_code=$?
-  if (( exit_code != 0 )); then
-    section "🧹  Cleanup (on failure)"
-    cleanup_docker
-    ok "docker stack cleaned"
+  trap - EXIT
+
+  if [[ "${CLEANUP_PROMPTED:-}" == "true" ]]; then
+    exit "${exit_code}"
   fi
+
+  if (( exit_code != 0 )); then
+    section "❌  Test failed"
+    echo "  Stack left running for inspection."
+  fi
+
+  prompt_cleanup
   exit "${exit_code}"
 }
 
@@ -105,8 +116,69 @@ wait_for_client() {
   done
 }
 
+verify_jaeger_traces() {
+  local deadline=$((SECONDS + MAX_WAIT_SECONDS))
+  local traces_json
+
+  while (( SECONDS < deadline )); do
+    if traces_json="$(curl -sf "${JAEGER_UI_URL}/api/traces?service=${OTEL_SERVICE_NAME}&limit=20" 2>/dev/null)"; then
+      if grep -q '"operationName":"gateway.request"' <<<"${traces_json}"; then
+        ok "gateway.request span found"
+        if grep -q '"operationName":"policy.check"' <<<"${traces_json}"; then
+          ok "policy.check span found"
+        else
+          fail "policy.check span not found in Jaeger"
+          return 1
+        fi
+        if grep -q '"operationName":"upstream.call"' <<<"${traces_json}"; then
+          ok "upstream.call span found"
+        else
+          fail "upstream.call span not found in Jaeger"
+          return 1
+        fi
+        ok "Jaeger UI → ${JAEGER_UI_URL}"
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  fail "no OpenTelemetry traces in Jaeger after ${MAX_WAIT_SECONDS}s (service: ${OTEL_SERVICE_NAME})"
+  docker compose -f "${COMPOSE_FILE}" logs gateway | tail -20 | sed 's/^/      /'
+  return 1
+}
+
+prompt_cleanup() {
+  local reply
+
+  CLEANUP_PROMPTED=true
+  section "👀  Inspect traces"
+  echo "  Jaeger:  ${JAEGER_UI_URL}  (service: ${OTEL_SERVICE_NAME})"
+  echo "  Gateway: ${GATEWAY_HEALTH_URL}"
+  echo
+
+  if [[ -t 0 ]]; then
+    read -r -p "Clean up Docker stack? [y/N] " reply
+  else
+    echo "  Non-interactive — stack left running."
+    echo "  When finished:"
+    echo "    docker compose -f docker/docker-compose.yaml down -v"
+    return
+  fi
+
+  if [[ "${reply}" =~ ^[Yy]$ ]]; then
+    section "🧹  Cleanup"
+    cleanup_docker
+    ok "docker stack cleaned"
+  else
+    echo "  Stack left running."
+    echo "  When finished:"
+    echo "    docker compose -f docker/docker-compose.yaml down -v"
+  fi
+}
+
 cd "${ROOT}"
-trap cleanup_on_exit EXIT
+trap finish EXIT
 
 section "🧪  E2E docker smoke test"
 
@@ -116,7 +188,7 @@ cleanup_docker
 ok "docker stack cleaned"
 
 section "🚀  Stack"
-step "Starting containers (server + gateway + postgres + client)"
+step "Starting containers (server + gateway + postgres + jaeger + client)"
 docker compose -f "${COMPOSE_FILE}" up -d --build
 ok "containers started"
 
@@ -194,8 +266,9 @@ if ! grep -q "^ping|denied|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; the
 fi
 ok "ping|denied|${EXPECTED_CLIENT_IDENTITY}"
 
-print_pass "${output}"
+section "📡  Tracing (OpenTelemetry / Jaeger)"
+step "Waiting for spans in Jaeger (service: ${OTEL_SERVICE_NAME})"
+verify_jaeger_traces
 
-section "🧹  Cleanup"
-cleanup_docker
-ok "docker stack cleaned"
+print_pass "${output}"
+prompt_cleanup
