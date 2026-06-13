@@ -89,7 +89,9 @@ class MCPService:
         with _tracer.start_as_current_span("upstream.call") as span:
             span.set_attribute("upstream.url", self._upstream_url)
             try:
-                upstream_response = await self._client.send(upstream_request, stream=True)
+                upstream_response = await self._client.send(
+                    upstream_request, stream=True
+                )
             except httpx.TimeoutException:
                 span.set_attribute("http.status_code", 504)
                 return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")

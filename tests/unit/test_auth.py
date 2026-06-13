@@ -70,7 +70,9 @@ class TestAuthService:
     def test_authenticate_returns_none_for_wrong_secret(
         self, service: AuthService
     ) -> None:
-        token = jwt.encode({"sub": "alice"}, "other-secret-with-32-byte-minimum", algorithm="HS256")
+        token = jwt.encode(
+            {"sub": "alice"}, "other-secret-with-32-byte-minimum", algorithm="HS256"
+        )
         assert service.authenticate(f"Bearer {token}") is None
 
     def test_authenticate_returns_none_for_token_without_sub(

@@ -51,10 +51,14 @@ class TestAuthenticateDependency:
         self, enabled_service: AuthService
     ) -> None:
         token = jwt.encode({"sub": "alice"}, _TEST_SECRET, algorithm="HS256")
-        assert await authenticate(_request(enabled_service, f"Bearer {token}")) == "alice"
+        assert (
+            await authenticate(_request(enabled_service, f"Bearer {token}")) == "alice"
+        )
 
     @pytest.mark.anyio
-    async def test_raises_401_when_token_missing(self, enabled_service: AuthService) -> None:
+    async def test_raises_401_when_token_missing(
+        self, enabled_service: AuthService
+    ) -> None:
         with pytest.raises(HTTPException) as exc_info:
             await authenticate(_request(enabled_service))
 
@@ -63,7 +67,9 @@ class TestAuthenticateDependency:
         assert exc_info.value.headers == {"WWW-Authenticate": "Bearer"}
 
     @pytest.mark.anyio
-    async def test_raises_401_when_token_invalid(self, enabled_service: AuthService) -> None:
+    async def test_raises_401_when_token_invalid(
+        self, enabled_service: AuthService
+    ) -> None:
         with pytest.raises(HTTPException) as exc_info:
             await authenticate(_request(enabled_service, "Bearer not-a-valid-jwt"))
 

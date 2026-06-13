@@ -62,9 +62,11 @@ def main() -> None:
         config.tracing.exporter_endpoint if config.tracing.enabled else "disabled"
     )
     print(
-        f"Listening on {config.listen.host}:{config.listen.port} → {config.upstream.url} "
+        f"Listening on {config.listen.host}:{config.listen.port} "
+        f"→ {config.upstream.url} "
         f"(policy: {POLICY_PATH}, tools allowed: {allowed}, "
-        f"audit: {config.audit.db_path}, auth: {auth_status}, tracing: {tracing_status})"
+        f"audit: {config.audit.db_path}, auth: {auth_status}, "
+        f"tracing: {tracing_status})"
     )
     uvicorn.run(app, host=config.listen.host, port=config.listen.port)
 

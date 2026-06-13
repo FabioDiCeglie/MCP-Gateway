@@ -68,12 +68,16 @@ def load_policy() -> PolicyConfig:
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
-        raise ValueError(f"Policy file must be a YAML mapping, got {type(raw).__name__}")
+        raise ValueError(
+            f"Policy file must be a YAML mapping, got {type(raw).__name__}"
+        )
 
     try:
         return PolicyConfig.model_validate(raw)
     except ValidationError as exc:
-        raise ValueError(f"Invalid policy configuration in {POLICY_PATH}:\n{exc}") from exc
+        raise ValueError(
+            f"Invalid policy configuration in {POLICY_PATH}:\n{exc}"
+        ) from exc
 
 
 def _load_auth_config() -> AuthConfig:

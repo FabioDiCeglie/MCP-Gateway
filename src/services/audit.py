@@ -111,7 +111,8 @@ class AuditService:
                 cur.execute(
                     """
                     INSERT INTO audit_events (
-                        timestamp, tool_name, outcome, latency_ms, request_id, client_identity
+                        timestamp, tool_name, outcome, latency_ms,
+                        request_id, client_identity
                     )
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,

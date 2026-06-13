@@ -28,7 +28,9 @@ def _tools_call_body(tool_name: str, request_id: int | str = 1) -> bytes:
     ).encode()
 
 
-def _fetch_events(audit: AuditService) -> list[tuple[str, str, int, str | None, str | None]]:
+def _fetch_events(
+    audit: AuditService,
+) -> list[tuple[str, str, int, str | None, str | None]]:
     conn = sqlite3.connect(audit._db_path)
     try:
         return conn.execute(
@@ -146,7 +148,9 @@ class TestMCPServiceProxy:
         assert result.body == b"upstream-ok"
         assert result.stream is None
 
-        tool_name, outcome, latency_ms, request_id, client_identity = _fetch_events(audit)[0]
+        tool_name, outcome, latency_ms, request_id, client_identity = _fetch_events(
+            audit
+        )[0]
         assert tool_name == "echo"
         assert outcome == "allowed"
         assert latency_ms >= 0
@@ -246,9 +250,7 @@ class TestMCPServiceProxy:
 
         assert result.stream is not None
         assert result.body is None
-        assert "transfer-encoding" not in {
-            key.lower() for key in result.headers
-        }
+        assert "transfer-encoding" not in {key.lower() for key in result.headers}
 
         chunks: list[bytes] = []
         async for chunk in result.stream:

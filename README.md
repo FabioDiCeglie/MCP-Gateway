@@ -1,8 +1,32 @@
 # MCP Gateway
 
+[![CI](https://github.com/FabioDiCeglie/MCP-Gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/FabioDiCeglie/MCP-Gateway/actions/workflows/ci.yml)
+
 A control plane between MCP clients and MCP servers — auth, policy, audit, and observability.
 
-See [DOCS.md](./DOCS.md) for architecture and design decisions.
+See [DOCS.md](./DOCS.md) for design decisions and [PLAN.md](./PLAN.md) for the milestone roadmap.
+
+## Architecture
+
+Agents call MCP tools through a single choke point. The gateway forwards Streamable HTTP on `/mcp` and hooks control-plane logic at one insertion point (`MCPService.proxy()`).
+
+```
+Agent / Client  →  MCP Gateway  →  MCP Server(s)
+                        │
+                        ├─ Auth (JWT HS256 — dev/local)
+                        ├─ Tool policy (allow-list on tools/call)
+                        ├─ Audit log (SQLite / Postgres)
+                        └─ Tracing (OpenTelemetry → Jaeger)
+```
+
+## Verify
+
+```bash
+uv sync --group dev
+uv run ruff check . && uv run ruff format --check .
+uv run pytest
+./tests/e2e-docker.sh
+```
 
 Copy [`.env.example`](./.env.example) to `.env` before running tests or Docker Compose.
 
@@ -78,7 +102,7 @@ Compose overrides `GATEWAY_UPSTREAM_URL`, `GATEWAY_AUDIT_DB_PATH`, and `GATEWAY_
 ./tests/e2e-docker.sh
 ```
 
-CI runs unit tests (`uv run pytest`) and `./tests/e2e-docker.sh` on every pull request (see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)).
+CI runs ruff, unit tests (`uv run pytest`), and `./tests/e2e-docker.sh` on every pull request (see [`.github/workflows/ci.yml`](./.github/workflows/ci.yml)).
 
 ## Project layout
 

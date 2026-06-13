@@ -9,7 +9,7 @@ from services.tools_policy import POLICY_DENIED_CODE, ToolsPolicyService
 
 
 class TestToolsPolicyService:
-    """Policy allow-list: only echo may run; everything else is denied at the gateway."""
+    """Policy allow-list: only echo may run; other tools are denied."""
 
     @pytest.fixture
     def service(self) -> ToolsPolicyService:
@@ -89,7 +89,9 @@ class TestToolsPolicyService:
         assert error["code"] == POLICY_DENIED_CODE
         assert error["message"] == "Tool 'ping' denied by gateway policy"
 
-    def test_check_post_ignores_non_tools_call(self, service: ToolsPolicyService) -> None:
+    def test_check_post_ignores_non_tools_call(
+        self, service: ToolsPolicyService
+    ) -> None:
         body = json.dumps(
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
         ).encode()

@@ -12,7 +12,9 @@ from services.audit import AuditService
 _AUDIT_DB = "audit.db"
 
 
-def _fetch_events(service: AuditService) -> list[tuple[str, str, int, str | None, str | None]]:
+def _fetch_events(
+    service: AuditService,
+) -> list[tuple[str, str, int, str | None, str | None]]:
     conn = sqlite3.connect(service._db_path)
     try:
         return conn.execute(
@@ -80,7 +82,9 @@ class TestAuditService:
 
         assert _fetch_events(service) == [("ping", "denied", 0, "req-2", None)]
 
-    def test_record_serializes_non_string_request_id(self, service: AuditService) -> None:
+    def test_record_serializes_non_string_request_id(
+        self, service: AuditService
+    ) -> None:
         service.record(
             tool_name="echo",
             outcome="allowed",
@@ -102,7 +106,9 @@ class TestAuditService:
 
     # --- record_tool_call ---
 
-    def test_record_tool_call_denied_has_zero_latency(self, service: AuditService) -> None:
+    def test_record_tool_call_denied_has_zero_latency(
+        self, service: AuditService
+    ) -> None:
         service.record_tool_call(
             tool_name="ping",
             request_id="req-3",
@@ -135,7 +141,9 @@ class TestAuditService:
             client_identity="bob",
         )
 
-        tool_name, outcome, latency_ms, request_id, client_identity = _fetch_events(service)[0]
+        tool_name, outcome, latency_ms, request_id, client_identity = _fetch_events(
+            service
+        )[0]
         assert tool_name == "echo"
         assert outcome == "allowed"
         assert latency_ms >= 40
