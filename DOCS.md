@@ -153,7 +153,7 @@ sequenceDiagram
 
 
 
-Denied calls are logged **before** the policy error is returned. Allowed calls are logged after the upstream responds (or times out).
+Denied calls are logged **before** the policy error is returned. Allowed calls are logged after a successful upstream response. Gateway errors (502/504) are not audited.
 
 ### What gets logged
 
@@ -185,7 +185,7 @@ Postgres credentials live in `.env` (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POST
 
 ## Auth (JWT)
 
-Ingress authentication on `/mcp` only. `/health` stays public. Runs **before** policy and audit.
+Ingress authentication on `/mcp` only. `/health` (liveness) and `/health/upstream` (readiness — probes upstream, 503 if unreachable) stay public. Runs **before** policy and audit.
 
 ### Config
 
