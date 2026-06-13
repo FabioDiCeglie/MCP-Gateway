@@ -93,5 +93,8 @@ policy.yaml           # Tool policy (tools_allowed)
 mcp-server/           # Demo upstream (echo, ping)
 mcp-client/           # Smoke-test client
 docker/               # Dockerfile, compose stack, Jaeger UI config
-tests/                # e2e-local.sh, e2e-docker.sh
+tests/
+  unit/               # pytest — policy, auth, audit, mcp, deps, tracing
+  e2e-local.sh        # local smoke test
+  e2e-docker.sh       # docker smoke test
 ```
