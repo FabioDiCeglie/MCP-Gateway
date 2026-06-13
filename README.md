@@ -90,7 +90,7 @@ src/
     auth.py           # authenticate dependency (JWT)
   routes/
     mcp.py            # /mcp proxy route
-    health.py         # GET /health
+    health.py         # GET /health, GET /health/upstream
   services/
     mcp.py            # MCPService — proxy, policy, audit, trace spans
     tools_policy.py   # ToolsPolicyService — tools/call allow-list
