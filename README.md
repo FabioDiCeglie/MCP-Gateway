@@ -26,6 +26,14 @@ docker compose -f docker/docker-compose.yaml up -d jaeger
 
 Jaeger UI: http://localhost:16686
 
+## Unit tests
+
+Policy, auth, audit, MCP proxy, and deps:
+
+```bash
+uv run pytest
+```
+
 ## E2E tests
 
 **Manual** — three terminals:

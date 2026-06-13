@@ -92,25 +92,9 @@ class MCPService:
                 upstream_response = await self._client.send(upstream_request, stream=True)
             except httpx.TimeoutException:
                 span.set_attribute("http.status_code", 504)
-                if tool_call is not None:
-                    self._audit.record_tool_call(
-                        tool_name=tool_call.tool_name,
-                        request_id=tool_call.request_id,
-                        outcome="allowed",
-                        started_at=started_at,
-                        client_identity=client_identity,
-                    )
                 return ProxyResult(status_code=504, headers={}, body=b"Gateway timeout")
             except httpx.RequestError:
                 span.set_attribute("http.status_code", 502)
-                if tool_call is not None:
-                    self._audit.record_tool_call(
-                        tool_name=tool_call.tool_name,
-                        request_id=tool_call.request_id,
-                        outcome="allowed",
-                        started_at=started_at,
-                        client_identity=client_identity,
-                    )
                 return ProxyResult(status_code=502, headers={}, body=b"Bad gateway")
 
             span.set_attribute("http.status_code", upstream_response.status_code)

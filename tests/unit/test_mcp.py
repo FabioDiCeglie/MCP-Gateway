@@ -196,7 +196,7 @@ class TestMCPServiceProxy:
         assert _fetch_events(audit) == []
 
     @pytest.mark.anyio
-    async def test_upstream_timeout_returns_504_and_audits(
+    async def test_upstream_timeout_returns_504(
         self, policy: ToolsPolicyService, audit: AuditService
     ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -209,10 +209,9 @@ class TestMCPServiceProxy:
 
         assert result.status_code == 504
         assert result.body == b"Gateway timeout"
-        assert _fetch_events(audit)[0][:2] == ("echo", "allowed")
 
     @pytest.mark.anyio
-    async def test_upstream_error_returns_502_and_audits(
+    async def test_upstream_error_returns_502(
         self, policy: ToolsPolicyService, audit: AuditService
     ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -225,7 +224,6 @@ class TestMCPServiceProxy:
 
         assert result.status_code == 502
         assert result.body == b"Bad gateway"
-        assert _fetch_events(audit)[0][:2] == ("echo", "allowed")
 
     @pytest.mark.anyio
     async def test_sse_upstream_response_returns_stream(
