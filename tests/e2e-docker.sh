@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT}/docker/docker-compose.yaml"
 GATEWAY_HEALTH_URL="http://127.0.0.1:8080/health"
+GATEWAY_UPSTREAM_HEALTH_URL="http://127.0.0.1:8080/health/upstream"
 GATEWAY_MCP_URL="http://127.0.0.1:8080/mcp"
 JAEGER_UI_URL="http://127.0.0.1:16686"
 MAX_WAIT_SECONDS=60
@@ -55,7 +56,8 @@ print_pass() {
   echo "╚════════════════════════════════════════╝"
   echo
   echo "  Flow      client → gateway (:8080) → server (:8000)"
-  echo "  Health    ${GATEWAY_HEALTH_URL}"
+  echo "  Health    ${GATEWAY_HEALTH_URL} (liveness)"
+  echo "  Readiness ${GATEWAY_UPSTREAM_HEALTH_URL}"
   echo "  Auth      🔐 JWT HS256 (from .env)"
   echo "  Identity  ${EXPECTED_CLIENT_IDENTITY}"
   echo "  Client    $(grep '^Connected to' <<<"${client_output}")"
@@ -194,7 +196,15 @@ ok "containers started"
 
 step "Waiting for gateway health"
 wait_for_gateway_health
-ok "mcp-gateway healthy"
+ok "mcp-gateway healthy (liveness)"
+
+step "Checking upstream readiness"
+if ! curl -sf "${GATEWAY_UPSTREAM_HEALTH_URL}" >/dev/null; then
+  fail "GET /health/upstream → expected 200, upstream unreachable"
+  docker compose -f "${COMPOSE_FILE}" logs gateway mcp-server
+  exit 1
+fi
+ok "GET /health/upstream → upstream reachable"
 
 section "🔐  Auth (JWT)"
 echo "  secret     loaded from .env (gateway + mcp-client via env_file)"
