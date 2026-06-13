@@ -11,6 +11,8 @@ from config import POLICY_PATH, load_config
 from routes import health_router, mcp_router
 from services.audit import AuditService
 from services.auth import AuthService
+from services.mcp import MCPService
+from services.tools_policy import ToolsPolicyService
 from services.tracing import TracingService
 
 
@@ -24,9 +26,16 @@ async def lifespan(app: FastAPI):
     audit_service.open()
     app.state.audit_service = audit_service
     app.state.auth_service = AuthService(config.auth)
+    app.state.tools_policy_service = ToolsPolicyService(config.policy)
 
     async with httpx.AsyncClient(follow_redirects=False) as client:
         app.state.http_client = client
+        app.state.mcp_service = MCPService(
+            client,
+            str(config.upstream.url),
+            app.state.tools_policy_service,
+            audit_service,
+        )
         yield
 
     audit_service.close()
