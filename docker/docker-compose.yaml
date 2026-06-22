@@ -26,6 +26,17 @@ services:
       timeout: 3s
       retries: 15
 
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   jaeger:
     container_name: jaeger
     image: jaegertracing/all-in-one:latest
@@ -49,6 +60,7 @@ services:
       GATEWAY_UPSTREAM_URL: http://mcp-server:8000/mcp
       GATEWAY_AUDIT_DB_PATH: postgresql://${POSTGRES_USER:-gateway}:${POSTGRES_PASSWORD:-gateway}@postgres:5432/${POSTGRES_DB:-audit}
       GATEWAY_OTEL_EXPORTER_ENDPOINT: http://jaeger:4318/v1/traces
+      GATEWAY_REDIS_URL: redis://redis:6379/0
     ports:
       - "8080:8080"
     volumes:
@@ -58,6 +70,8 @@ services:
       mcp-server:
         condition: service_started
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       jaeger:
         condition: service_started

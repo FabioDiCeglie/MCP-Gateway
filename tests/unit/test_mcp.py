@@ -11,10 +11,12 @@ import pytest
 from config import PolicyConfig
 from services.audit import AuditService
 from services.mcp import MCPService
+from services.rate_limit import RateLimitService
 from services.tools_policy import POLICY_DENIED_CODE, ToolsPolicyService
 
 _AUDIT_DB = "audit.db"
 _UPSTREAM_URL = "http://upstream.test/mcp"
+_REDIS_URL = "redis://127.0.0.1:6379/0"
 
 
 def _tools_call_body(tool_name: str, request_id: int | str = 1) -> bytes:
@@ -93,9 +95,16 @@ class TestMCPServiceProxy:
         yield service
         service.close()
 
+    @pytest.fixture
+    def rate_limit(self) -> RateLimitService:
+        return RateLimitService(_REDIS_URL)
+
     @pytest.mark.anyio
     async def test_denied_tool_call_returns_policy_error_without_upstream(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         upstream_calls: list[httpx.Request] = []
 
@@ -105,7 +114,7 @@ class TestMCPServiceProxy:
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy(
                 "POST",
                 {},
@@ -121,7 +130,10 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_allowed_tool_call_forwards_to_upstream_and_audits(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         upstream_calls: list[httpx.Request] = []
 
@@ -131,7 +143,7 @@ class TestMCPServiceProxy:
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy(
                 "POST",
                 {"Host": "localhost", "Accept": "application/json"},
@@ -159,7 +171,10 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_non_tool_call_post_forwards_without_audit(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         upstream_calls: list[httpx.Request] = []
 
@@ -172,7 +187,7 @@ class TestMCPServiceProxy:
         ).encode()
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy("POST", {}, body)
 
         assert len(upstream_calls) == 1
@@ -181,7 +196,10 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_get_request_forwards_without_audit(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         upstream_calls: list[httpx.Request] = []
 
@@ -191,7 +209,7 @@ class TestMCPServiceProxy:
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy("GET", {}, b"")
 
         assert len(upstream_calls) == 1
@@ -201,14 +219,17 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_upstream_timeout_returns_504(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.TimeoutException("timed out")
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy("POST", {}, _tools_call_body("echo"))
 
         assert result.status_code == 504
@@ -216,14 +237,17 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_upstream_error_returns_502(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy("POST", {}, _tools_call_body("echo"))
 
         assert result.status_code == 502
@@ -231,7 +255,10 @@ class TestMCPServiceProxy:
 
     @pytest.mark.anyio
     async def test_sse_upstream_response_returns_stream(
-        self, policy: ToolsPolicyService, audit: AuditService
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
     ) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
@@ -245,7 +272,7 @@ class TestMCPServiceProxy:
 
         transport = httpx.MockTransport(handler)
         async with httpx.AsyncClient(transport=transport) as client:
-            service = MCPService(client, _UPSTREAM_URL, policy, audit)
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
             result = await service.proxy("POST", {}, _tools_call_body("echo"))
 
         assert result.stream is not None

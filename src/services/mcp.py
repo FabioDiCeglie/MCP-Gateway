@@ -8,6 +8,7 @@ import httpx
 from opentelemetry import trace
 
 from services.audit import AuditService
+from services.rate_limit import RateLimitService
 from services.tools_policy import ToolCall, ToolsPolicyService
 
 _tracer = trace.get_tracer(__name__)
@@ -42,11 +43,13 @@ class MCPService:
         upstream_url: str,
         tools_policy_service: ToolsPolicyService,
         audit_service: AuditService,
+        rate_limit_service: RateLimitService,
     ) -> None:
         self._client = client
         self._upstream_url = upstream_url
         self._tools_policy = tools_policy_service
         self._audit = audit_service
+        self._rate_limit = rate_limit_service
 
     async def proxy(
         self,
@@ -60,6 +63,24 @@ class MCPService:
         if method == "POST" and body:
             tool_call = ToolsPolicyService.parse_tool_call(body)
             if tool_call is not None:
+                if client_identity is not None:
+                    with _tracer.start_as_current_span("rate_limit.check") as span:
+                        span.set_attribute("tool.name", tool_call.tool_name)
+                        span.set_attribute("client.identity", client_identity)
+                        denial = await self._rate_limit.check(
+                            client_identity,
+                            request_id=tool_call.request_id,
+                            tool_name=tool_call.tool_name,
+                        )
+                        if denial is not None:
+                            span.set_attribute("rate_limit.outcome", "rate_limited")
+                            return ProxyResult(
+                                status_code=denial.status_code,
+                                headers=denial.headers,
+                                body=denial.body,
+                            )
+                        span.set_attribute("rate_limit.outcome", "allowed")
+
                 with _tracer.start_as_current_span("policy.check") as span:
                     span.set_attribute("tool.name", tool_call.tool_name)
                     denial = self._tools_policy.check_post(body)

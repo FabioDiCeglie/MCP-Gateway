@@ -17,6 +17,7 @@ MCP_PROXY_METHODS = ["GET", "POST", "DELETE"]
     methods=MCP_PROXY_METHODS,
     responses={
         401: {"description": "Unauthorized — missing or invalid JWT"},
+        429: {"description": "Too many requests — rate limit exceeded"},
         502: {"description": "Bad gateway — upstream unreachable"},
         504: {"description": "Gateway timeout — upstream did not respond in time"},
     },

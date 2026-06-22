@@ -12,6 +12,7 @@ from routes import health_router, mcp_router
 from services.audit import AuditService
 from services.auth import AuthService
 from services.mcp import MCPService
+from services.rate_limit import RateLimitService
 from services.tools_policy import ToolsPolicyService
 from services.tracing import TracingService
 
@@ -27,6 +28,9 @@ async def lifespan(app: FastAPI):
     app.state.audit_service = audit_service
     app.state.auth_service = AuthService(config.auth)
     app.state.tools_policy_service = ToolsPolicyService(config.policy)
+    rate_limit_service = RateLimitService(config.rate_limit.redis_url)
+    await rate_limit_service.open()
+    app.state.rate_limit_service = rate_limit_service
 
     async with httpx.AsyncClient(follow_redirects=False) as client:
         app.state.http_client = client
@@ -35,10 +39,12 @@ async def lifespan(app: FastAPI):
             str(config.upstream.url),
             app.state.tools_policy_service,
             audit_service,
+            rate_limit_service,
         )
         yield
 
     audit_service.close()
+    await rate_limit_service.close()
     tracing_service.shutdown()
 
 
@@ -61,12 +67,13 @@ def main() -> None:
     tracing_status = (
         config.tracing.exporter_endpoint if config.tracing.enabled else "disabled"
     )
+    rate_limit_status = config.rate_limit.redis_url
     print(
         f"Listening on {config.listen.host}:{config.listen.port} "
         f"→ {config.upstream.url} "
         f"(policy: {POLICY_PATH}, tools allowed: {allowed}, "
         f"audit: {config.audit.db_path}, auth: {auth_status}, "
-        f"tracing: {tracing_status})"
+        f"tracing: {tracing_status}, rate limit: {rate_limit_status})"
     )
     uvicorn.run(app, host=config.listen.host, port=config.listen.port)
 

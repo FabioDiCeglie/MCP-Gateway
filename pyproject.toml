@@ -16,6 +16,7 @@ dependencies = [
     "opentelemetry-api>=1.29",
     "opentelemetry-sdk>=1.29",
     "opentelemetry-exporter-otlp-proto-http>=1.29",
+    "redis>=5.0",
 ]
 
 [project.scripts]
@@ -44,6 +45,7 @@ only-include = ["src/main.py", "src/config.py", "src/deps", "src/routes", "src/s
 "src/services/audit.py" = "services/audit.py"
 "src/services/auth.py" = "services/auth.py"
 "src/services/tracing.py" = "services/tracing.py"
+"src/services/rate_limit.py" = "services/rate_limit.py"
 "mcp-server/server.py" = "mcp_server.py"
 "mcp-client/client.py" = "mcp_client.py"
 

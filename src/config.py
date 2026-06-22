@@ -46,6 +46,10 @@ class TracingConfig(BaseModel):
         return self.exporter_endpoint is not None
 
 
+class RateLimitConfig(BaseModel):
+    redis_url: str = "redis://127.0.0.1:6379/0"
+
+
 class GatewayConfig(BaseModel):
     listen: ListenConfig = Field(default_factory=ListenConfig)
     upstream: UpstreamConfig
@@ -53,6 +57,7 @@ class GatewayConfig(BaseModel):
     audit: AuditConfig = Field(default_factory=AuditConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
 
 
 def load_policy() -> PolicyConfig:
@@ -91,6 +96,13 @@ def _load_tracing_config() -> TracingConfig:
     return TracingConfig(exporter_endpoint=endpoint, service_name=service_name)
 
 
+def _load_rate_limit_config() -> RateLimitConfig:
+    redis_url = os.environ.get(
+        "GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0"
+    ).strip()
+    return RateLimitConfig(redis_url=redis_url)
+
+
 def load_config() -> GatewayConfig:
     """Load and validate gateway config."""
     upstream_url = os.environ.get("GATEWAY_UPSTREAM_URL", "http://127.0.0.1:8000/mcp")
@@ -103,6 +115,7 @@ def load_config() -> GatewayConfig:
             audit=AuditConfig(db_path=audit_db_path),
             auth=_load_auth_config(),
             tracing=_load_tracing_config(),
+            rate_limit=_load_rate_limit_config(),
         )
     except ValidationError as exc:
         raise ValueError(f"Invalid gateway configuration:\n{exc}") from exc
