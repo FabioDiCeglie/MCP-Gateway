@@ -47,6 +47,9 @@ fail() {
   echo "  ❌  $*" >&2
 }
 
+# shellcheck source=tests/redis.sh
+source "${ROOT}/tests/redis.sh"
+
 print_pass() {
   local client_output="$1"
 
@@ -136,6 +139,12 @@ verify_jaeger_traces() {
           ok "upstream.call span found"
         else
           fail "upstream.call span not found in Jaeger"
+          return 1
+        fi
+        if grep -q '"operationName":"rate_limit.check"' <<<"${traces_json}"; then
+          ok "rate_limit.check span found"
+        else
+          fail "rate_limit.check span not found in Jaeger"
           return 1
         fi
         ok "Jaeger UI → ${JAEGER_UI_URL}"
@@ -254,6 +263,8 @@ if ! grep -q "ping: denied" <<<"${output}"; then
 fi
 ok "ping denied → blocked at gateway"
 
+run_rate_limit_e2e compose "${ROOT}"
+
 section "📋  Audit (Postgres)"
 audit_table="$(docker compose -f "${COMPOSE_FILE}" exec -T postgres \
   psql -U "${POSTGRES_USER:-gateway}" -d "${POSTGRES_DB:-audit}" \
@@ -275,6 +286,12 @@ if ! grep -q "^ping|denied|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; the
   exit 1
 fi
 ok "ping|denied|${EXPECTED_CLIENT_IDENTITY}"
+
+if ! grep -q "^echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; then
+  fail "expected echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}"
+  exit 1
+fi
+ok "echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}"
 
 section "📡  Tracing (OpenTelemetry / Jaeger)"
 step "Waiting for spans in Jaeger (service: ${OTEL_SERVICE_NAME})"

@@ -32,6 +32,8 @@ if [[ -z "${GATEWAY_JWT_SECRET:-}" ]]; then
   exit 1
 fi
 
+export GATEWAY_REDIS_URL="${GATEWAY_REDIS_URL:-redis://127.0.0.1:6379/0}"
+
 SERVER_PID=""
 GATEWAY_PID=""
 
@@ -55,6 +57,9 @@ fail() {
   echo "  ❌  $*" >&2
 }
 
+# shellcheck source=tests/redis.sh
+source "${ROOT}/tests/redis.sh"
+
 kill_port() {
   local port="$1"
   local pids
@@ -68,6 +73,7 @@ cleanup_processes() {
   kill "${SERVER_PID}" "${GATEWAY_PID}" 2>/dev/null || true
   kill_port 8000
   kill_port 8080
+  redis_stop_local
 }
 
 wait_for_port() {
@@ -141,6 +147,12 @@ verify_jaeger_traces() {
           ok "upstream.call span found"
         else
           fail "upstream.call span not found in Jaeger"
+          return 1
+        fi
+        if grep -q '"operationName":"rate_limit.check"' <<<"${traces_json}"; then
+          ok "rate_limit.check span found"
+        else
+          fail "rate_limit.check span not found in Jaeger"
           return 1
         fi
         ok "Jaeger UI → ${JAEGER_UI_URL}"
@@ -225,6 +237,11 @@ if [[ "${TRACING_ENABLED}" == "true" ]]; then
   ok "jaeger started (gateway → ${GATEWAY_OTEL_EXPORTER_ENDPOINT})"
 fi
 
+step "Starting Redis (:6379) for rate limiting"
+redis_start_local
+wait_for_port 6379 "redis"
+ok "redis started (${GATEWAY_REDIS_URL})"
+
 section "🚀  Stack"
 step "Starting mcp-server (:8000)"
 uv run mcp-server >"${LOG_DIR}/mcp-server.log" 2>&1 &
@@ -286,6 +303,8 @@ if ! grep -q "ping: denied" <<<"${output}"; then
 fi
 ok "ping denied → blocked at gateway"
 
+run_rate_limit_e2e local "${ROOT}"
+
 section "📋  Audit (SQLite)"
 audit_table="$(uv run python -c "
 import sqlite3
@@ -337,6 +356,12 @@ if ! grep -q "^ping|denied|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; the
   exit 1
 fi
 ok "ping|denied|${EXPECTED_CLIENT_IDENTITY}"
+
+if ! grep -q "^echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}$" <<<"${audit_rows}"; then
+  fail "expected echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}"
+  exit 1
+fi
+ok "echo|rate_limited|${EXPECTED_CLIENT_IDENTITY}"
 
 if [[ "${TRACING_ENABLED}" == "true" ]]; then
   section "📡  Tracing (OpenTelemetry / Jaeger)"
