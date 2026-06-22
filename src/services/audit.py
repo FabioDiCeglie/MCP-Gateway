@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import psycopg
 
-AuditOutcome = Literal["allowed", "denied"]
+AuditOutcome = Literal["allowed", "denied", "rate_limited"]
 
 # For local development environment, use SQLite.
 _SQLITE_SCHEMA = """
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL,
     tool_name TEXT NOT NULL,
-    outcome TEXT NOT NULL CHECK(outcome IN ('allowed', 'denied')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('allowed', 'denied', 'rate_limited')),
     latency_ms INTEGER NOT NULL,
     request_id TEXT,
     client_identity TEXT
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
     id SERIAL PRIMARY KEY,
     timestamp TEXT NOT NULL,
     tool_name TEXT NOT NULL,
-    outcome TEXT NOT NULL CHECK(outcome IN ('allowed', 'denied')),
+    outcome TEXT NOT NULL CHECK(outcome IN ('allowed', 'denied', 'rate_limited')),
     latency_ms INTEGER NOT NULL,
     request_id TEXT,
     client_identity TEXT

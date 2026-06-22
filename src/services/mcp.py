@@ -74,6 +74,12 @@ class MCPService:
                         )
                         if denial is not None:
                             span.set_attribute("rate_limit.outcome", "rate_limited")
+                            self._audit.record_tool_call(
+                                tool_name=tool_call.tool_name,
+                                request_id=tool_call.request_id,
+                                outcome="rate_limited",
+                                client_identity=client_identity,
+                            )
                             return ProxyResult(
                                 status_code=denial.status_code,
                                 headers=denial.headers,

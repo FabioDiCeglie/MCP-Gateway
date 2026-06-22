@@ -149,3 +149,23 @@ class TestAuditService:
         assert latency_ms >= 40
         assert request_id == "req-5"
         assert client_identity == "bob"
+
+    def test_record_tool_call_is_rate_limited(self, service: AuditService) -> None:
+        service.record_tool_call(
+            tool_name="echo",
+            request_id="req-6",
+            outcome="rate_limited",
+            client_identity="alice",
+        )
+
+        assert _fetch_events(service)[0][1] == "rate_limited"
+
+    def test_record_tool_call_is_not_rate_limited(self, service: AuditService) -> None:
+        service.record_tool_call(
+            tool_name="echo",
+            request_id="req-7",
+            outcome="allowed",
+            client_identity="alice",
+        )
+
+        assert _fetch_events(service)[0][1] != "rate_limited"

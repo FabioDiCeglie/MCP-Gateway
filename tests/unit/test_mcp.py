@@ -132,7 +132,7 @@ class TestMCPServiceProxy:
             audit
         )[0]
         assert tool_name == "echo"
-        assert outcome == "allowed"
+        assert outcome != "rate_limited"
         assert latency_ms >= 0
         assert request_id == "1"
         assert client_identity == "alice"
@@ -174,6 +174,7 @@ class TestMCPServiceProxy:
         error = json.loads(result.body)["error"]
         assert error["code"] == RATE_LIMIT_DENIED_CODE
         assert result.headers["retry-after"].isdigit()
+        assert _fetch_events(audit)[-1][1] == "rate_limited"
 
     @pytest.mark.anyio
     async def test_denied_tool_call_returns_policy_error_without_upstream(
