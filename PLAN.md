@@ -26,7 +26,7 @@ Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         ├─ Audit log (what happened — M4; who — M5 fills `client_identity`)
                         ├─ Auth (JWT HS256 — M5; `sub` → audit `client_identity`)
                         ├─ Tracing (OpenTelemetry — M6)
-                        └─ Rate limiter (per client / tool — M7)
+                        └─ Rate limiter (Redis, per client — M7)
 ```
 
 **M2 is intentionally dumb:** the gateway sits in the path and forwards traffic unchanged. Every later milestone adds a hook at `MCPService.proxy()` without rewriting the proxy.
@@ -59,6 +59,7 @@ These guide every milestone. If a shortcut violates one, we don't take it.
 | Config | **Env vars + YAML (policy)** | Gateway via env; policy file in M3 |
 | Audit storage | SQLite → Postgres | M4 |
 | Observability | OpenTelemetry | M6 |
+| Rate limit store | **Redis** | M7 — shared counters across gateway replicas |
 | Local dev | **Docker + Docker Compose** | Introduced in M1–M2; stack grows per milestone |
 | Dashboard | React | Much later; not in v0 |
 
@@ -138,7 +139,7 @@ One path for everything:
 | M4 | Audit log | [x] |
 | M5 | Auth + `client_identity` in audit | [x] |
 | M6 | Observability | [x] |
-| M7 | Rate limiter | [ ] |
+| M7 | Rate limiter | [x] |
 
 ### M0 — Repo
 
@@ -242,20 +243,21 @@ Make the gateway operable in production.
 
 ### M7 — Rate limiter
 
-Protect upstream and control cost — cap how often clients may invoke tools before traffic reaches the server.
+Protect upstream and control cost — cap how often authenticated clients may invoke tools before traffic reaches policy/upstream.
 
 - `RateLimitService` + hook in `MCPService.proxy()` after auth identity is known, before policy/upstream
 - Limits apply to **`tools/call` only** (pass-through for `initialize`, `tools/list`, etc.)
-- Token-bucket or sliding window; in-memory store for v0 (single gateway process)
-- Config via env: global default (e.g. `GATEWAY_RATE_LIMIT_CALLS`, `GATEWAY_RATE_LIMIT_WINDOW_SEC`); unset = rate limiting disabled
-- Key by `client_identity` when auth enabled; otherwise by client IP (`X-Forwarded-For` or direct peer)
-- Over limit → **429** with structured MCP JSON-RPC error + `Retry-After` header; audit row with outcome `rate_limited`
-- OpenTelemetry span: `rate_limit.check` (client key, tool name, outcome)
-- E2E: burst of allowed calls succeeds; next call within window → 429; window expiry → allowed again (`e2e-local.sh`, `e2e-docker.sh`)
+- **Redis** fixed window (`INCR` + `EXPIRE`); key `mcp-gateway:rate_limit:{client_identity}` — shared across gateway replicas
+- Limits as constants in `src/services/rate_limit.py` (`10` calls / `60`s window); `GATEWAY_REDIS_URL` for store (default `redis://127.0.0.1:6379/0`)
+- Key by `client_identity` when auth enabled; auth disabled → rate limiting skipped (no IP fallback)
+- Over limit → **429** with structured MCP JSON-RPC error (`-32001`) + `Retry-After` header; audit row with outcome `rate_limited`
+- OpenTelemetry span: `rate_limit.check` (`tool.name`, `client.identity`, `rate_limit.outcome`)
+- Compose: `redis` service; gateway `GATEWAY_REDIS_URL` override
+- E2E: shared probe in `tests/redis.sh` — burst → 429 → wait → OK (`e2e-local.sh`, `e2e-docker.sh`); audit `rate_limited`; Jaeger `rate_limit.check`
 
-**Done:** [ ]
+**Done:** [x]
 
-**Done when:** compose smoke test proves a client cannot exceed the configured `tools/call` budget; audit DB shows `rate_limited` rows; Jaeger shows `rate_limit.check` spans.
+**Done when:** compose smoke test proves a client cannot exceed the `tools/call` budget; audit DB shows `rate_limited` rows; Jaeger shows `rate_limit.check` spans.
 
 ---
 
