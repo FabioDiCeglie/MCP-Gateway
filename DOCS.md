@@ -42,9 +42,10 @@ MCP-relevant headers (`Mcp-Session-Id`, `Accept`, `Content-Type`, …) are forwa
 ```
 Agent / Client  →  MCP Gateway  →  MCP Server(s)
                         │
+                        ├─ Auth (JWT HS256)
+                        ├─ Rate limit (Redis — tools/call per client)
                         ├─ Tool policy (allow/deny tools)
                         ├─ Audit log (who called what, when)
-                        ├─ Auth (JWT HS256)
                         └─ Tracing (OpenTelemetry)
 ```
 
@@ -151,19 +152,18 @@ sequenceDiagram
     end
 ```
 
-
-
 Denied calls are logged **before** the policy error is returned. Allowed calls are logged after a successful upstream response. Gateway errors (502/504) are not audited.
 
-### What gets logged
+**Rate limited** — when auth is on and a client exceeds its `tools/call` budget, the gateway logs `outcome = rate_limited` and returns **429** before policy or upstream run. Same fields as a denial (`latency_ms = 0`); only the outcome differs. Auth off → no rate limit, so no `rate_limited` rows.
 
+### What gets logged
 
 | Field             | Description                                                          |
 | ----------------- | -------------------------------------------------------------------- |
 | `timestamp`       | UTC ISO-8601                                                         |
 | `tool_name`       | From JSON-RPC `params.name`                                          |
-| `outcome`         | `allowed` or `denied`                                                |
-| `latency_ms`      | Upstream round-trip for allowed calls; `0` for denials               |
+| `outcome`         | `allowed`, `denied`, or `rate_limited`                             |
+| `latency_ms`      | Upstream round-trip for allowed calls; `0` for denials and rate limits |
 | `request_id`      | JSON-RPC `id`                                                        |
 | `client_identity` | JWT `sub` claim from authenticated client; `NULL` when auth disabled |
 
@@ -185,7 +185,7 @@ Postgres credentials live in `.env` (`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POST
 
 ## Auth (JWT)
 
-Ingress authentication on `/mcp` only. `/health` (liveness) and `/health/upstream` (readiness — probes upstream, 503 if unreachable) stay public. Runs **before** policy and audit.
+Ingress authentication on `/mcp` only. `/health` (liveness) and `/health/upstream` (readiness — probes upstream, 503 if unreachable) stay public. Runs **before** rate limit, policy, and audit.
 
 ### Config
 
@@ -258,6 +258,86 @@ Missing or invalid token → **HTTP 401** before policy or audit run:
 
 ---
 
+## Rate limiter
+
+Cap how many `tools/call` requests each authenticated client may send in a time window. Hook lives in `MCPService.proxy()` — **after** auth resolves `client_identity`, **before** policy and upstream.
+
+Applies **only** to incoming `POST` bodies where JSON-RPC `method == "tools/call"`. When auth is disabled (`GATEWAY_JWT_SECRET` unset), there is no identity to key on — rate limiting is skipped entirely.
+
+### Flow
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant P as MCPService
+    participant R as RateLimitService
+    participant Redis as Redis
+    participant T as ToolsPolicyService
+    participant S as MCP Server
+
+    C->>P: POST /mcp (tools/call, client_identity set)
+    P->>R: check(client_identity)
+    R->>Redis: INCR key, EXPIRE on first hit
+
+    alt within limit
+        R-->>P: pass
+        P->>T: check_post(body)
+        Note over P,S: policy → upstream as usual
+    else over limit
+        R-->>P: RateLimitDenial
+        P-->>C: HTTP 429 + Retry-After + JSON-RPC error
+        Note over T,S: policy and upstream never run
+    end
+```
+
+### Limits
+
+Fixed in `[src/services/rate_limit.py](./src/services/rate_limit.py)`:
+
+| Constant | Value | Meaning |
+| -------- | ----- | ------- |
+| `RATE_LIMIT_CALLS` | `10` | Allowed `tools/call` requests per client per window |
+| `RATE_LIMIT_WINDOW_SEC` | `60` | Fixed window length (seconds) |
+| `RATE_LIMIT_DENIED_CODE` | `-32001` | JSON-RPC error code on denial |
+
+**Algorithm** — fixed window per client: Redis `INCR` on key `mcp-gateway:rate_limit:{client_identity}`; `EXPIRE` set on the first increment. Counts are shared across gateway instances (unlike in-process counters).
+
+**Scaling** — if you run multiple gateway replicas, they all share the same Redis counters. Scale Redis with the gateway (managed service, HA, enough headroom) — a single local Redis container is fine for dev, not for production load.
+
+**Scope** — one bucket per JWT `sub` (`client_identity`).
+
+### Config
+
+| Variable | Description |
+| -------- | ----------- |
+| `GATEWAY_REDIS_URL` | Redis connection URL (default `redis://127.0.0.1:6379/0`) |
+
+| Environment | Typical value |
+| ----------- | ------------- |
+| Local `uv run` | `redis://127.0.0.1:6379/0` — start Redis on `:6379` yourself, or let `e2e-local.sh` start a container |
+| Docker Compose | `redis://redis:6379/0` — compose overrides; `redis` service in `[docker/docker-compose.yaml](./docker/docker-compose.yaml)` |
+
+### Denial response
+
+Over limit → **HTTP 429** with a `Retry-After` header (seconds until the window resets) and a JSON-RPC error body:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "<request id>",
+  "error": {
+    "code": -32001,
+    "message": "Rate limit exceeded for tool 'echo' (client 'smoke-client')"
+  }
+}
+```
+
+**Why HTTP 429, not 200?** Policy denials use HTTP 200 because the request was valid but blocked by gateway rules. Rate limiting is a transport-level throttle — **429** + `Retry-After` is the standard signal for “try again later”, which clients, proxies, and retries understand without parsing JSON-RPC.
+
+Side effects on deny: audit row with `outcome = rate_limited` (see [Audit log](#audit-log)); OpenTelemetry span `rate_limit.check` with `tool.name`, `client.identity`, and `rate_limit.outcome = rate_limited`.
+
+---
+
 ## Tracing (OpenTelemetry)
 
 Distributed traces for every authenticated `/mcp` request — latency breakdown across the gateway layers. Spans export via OTLP HTTP when configured; unset endpoint = tracing disabled (no overhead).
@@ -303,7 +383,7 @@ sequenceDiagram
     R->>J: export spans (OTLP, batched)
 ```
 
-Each HTTP request to `/mcp` is one trace. `tools/call` adds `policy.check`; denied calls stop before `upstream.call`.
+Each HTTP request to `/mcp` is one trace. `tools/call` adds `rate_limit.check` (when authenticated) and `policy.check`; denied or rate-limited calls stop before `upstream.call`.
 
 ### Config
 
@@ -320,13 +400,15 @@ Nested waterfall — one trace per `/mcp` HTTP request:
 
 ```
 gateway.request          ← routes/mcp.py
+  ├─ rate_limit.check    ← services/mcp.py (tools/call + auth only)
   ├─ policy.check        ← services/mcp.py (tools/call only)
-  └─ upstream.call       ← services/mcp.py (skipped when policy denies)
+  └─ upstream.call       ← services/mcp.py (skipped when rate limit or policy denies)
 ```
 
 | Span | Attributes | When |
 | ---- | ---------- | ---- |
 | `gateway.request` | `http.method`, `http.route`, `client.identity`, `http.status_code` | Every authenticated `/mcp` request |
+| `rate_limit.check` | `tool.name`, `client.identity`, `rate_limit.outcome` (`allowed` / `rate_limited`) | `tools/call` POST when auth provides identity |
 | `policy.check` | `tool.name`, `policy.outcome` (`allowed` / `denied`) | `tools/call` POST only |
 | `upstream.call` | `upstream.url`, `http.status_code` | Request reaches upstream (502/504 on failure) |
 
