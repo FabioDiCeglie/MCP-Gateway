@@ -5,18 +5,18 @@ import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
+import fakeredis.aioredis
 import httpx
 import pytest
 
 from config import PolicyConfig
 from services.audit import AuditService
 from services.mcp import MCPService
-from services.rate_limit import RateLimitService
+from services.rate_limit import RATE_LIMIT_DENIED_CODE, RateLimitService
 from services.tools_policy import POLICY_DENIED_CODE, ToolsPolicyService
 
 _AUDIT_DB = "audit.db"
 _UPSTREAM_URL = "http://upstream.test/mcp"
-_REDIS_URL = "redis://127.0.0.1:6379/0"
 
 
 def _tools_call_body(tool_name: str, request_id: int | str = 1) -> bytes:
@@ -97,7 +97,83 @@ class TestMCPServiceProxy:
 
     @pytest.fixture
     def rate_limit(self) -> RateLimitService:
-        return RateLimitService(_REDIS_URL)
+        service = RateLimitService("redis://unused")
+        service._client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        return service
+
+    @pytest.mark.anyio
+    async def test_rate_limit_allows_tool_call_under_limit(
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
+    ) -> None:
+        upstream_calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_calls.append(request)
+            return httpx.Response(200, content=b"upstream-ok")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
+            result = await service.proxy(
+                "POST",
+                {},
+                _tools_call_body("echo"),
+                client_identity="alice",
+            )
+
+        assert result.status_code == 200
+        assert result.body == b"upstream-ok"
+        assert len(upstream_calls) == 1
+
+        tool_name, outcome, latency_ms, request_id, client_identity = _fetch_events(
+            audit
+        )[0]
+        assert tool_name == "echo"
+        assert outcome == "allowed"
+        assert latency_ms >= 0
+        assert request_id == "1"
+        assert client_identity == "alice"
+
+    @pytest.mark.anyio
+    async def test_rate_limited_tool_call_returns_429_before_upstream(
+        self,
+        policy: ToolsPolicyService,
+        audit: AuditService,
+        rate_limit: RateLimitService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("services.rate_limit.RATE_LIMIT_CALLS", 1)
+        upstream_calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_calls.append(request)
+            return httpx.Response(200, content=b"upstream-ok")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            service = MCPService(client, _UPSTREAM_URL, policy, audit, rate_limit)
+            await service.proxy(
+                "POST",
+                {},
+                _tools_call_body("echo"),
+                client_identity="alice",
+            )
+            result = await service.proxy(
+                "POST",
+                {},
+                _tools_call_body("echo", request_id=2),
+                client_identity="alice",
+            )
+
+        assert len(upstream_calls) == 1
+        assert result.status_code == 429
+        assert result.body is not None
+        error = json.loads(result.body)["error"]
+        assert error["code"] == RATE_LIMIT_DENIED_CODE
+        assert result.headers["retry-after"].isdigit()
 
     @pytest.mark.anyio
     async def test_denied_tool_call_returns_policy_error_without_upstream(
