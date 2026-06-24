@@ -67,23 +67,8 @@ class MCPService:
                     if denial := await self._check_rate_limit(tool_call, client_identity):
                         return denial
 
-                with _tracer.start_as_current_span("policy.check") as span:
-                    span.set_attribute("tool.name", tool_call.tool_name)
-                    denial = self._tools_policy.check_post(body)
-                    if denial is not None:
-                        span.set_attribute("policy.outcome", "denied")
-                        self._audit.record_tool_call(
-                            tool_name=tool_call.tool_name,
-                            request_id=tool_call.request_id,
-                            outcome="denied",
-                            client_identity=client_identity,
-                        )
-                        return ProxyResult(
-                            status_code=denial.status_code,
-                            headers=denial.headers,
-                            body=denial.body,
-                        )
-                    span.set_attribute("policy.outcome", "allowed")
+                if denial := self._check_policy(tool_call, body, client_identity):
+                    return denial
 
         started_at = time.perf_counter() if tool_call is not None else None
 
@@ -156,6 +141,32 @@ class MCPService:
                 tool_name=tool_call.tool_name,
                 request_id=tool_call.request_id,
                 outcome="rate_limited",
+                client_identity=client_identity,
+            )
+            return ProxyResult(
+                status_code=denial.status_code,
+                headers=denial.headers,
+                body=denial.body,
+            )
+
+    def _check_policy(
+        self,
+        tool_call: ToolCall,
+        body: bytes,
+        client_identity: str | None,
+    ) -> ProxyResult | None:
+        with _tracer.start_as_current_span("policy.check") as span:
+            span.set_attribute("tool.name", tool_call.tool_name)
+            denial = self._tools_policy.check_post(body)
+            if denial is None:
+                span.set_attribute("policy.outcome", "allowed")
+                return None
+
+            span.set_attribute("policy.outcome", "denied")
+            self._audit.record_tool_call(
+                tool_name=tool_call.tool_name,
+                request_id=tool_call.request_id,
+                outcome="denied",
                 client_identity=client_identity,
             )
             return ProxyResult(
