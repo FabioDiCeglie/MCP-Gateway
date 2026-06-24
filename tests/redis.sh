@@ -22,11 +22,24 @@ redis_reset_counter_compose() {
 
 redis_run_probe() {
   local root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  local mode="${2:-local}"
+  local -a probe_cmd
 
   export GATEWAY_MCP_URL EXPECTED_CLIENT_IDENTITY PYTHONUNBUFFERED=1
-  (
-    cd "${root}"
-    uv run python -u <<'PY'
+
+  if [[ "${mode}" == "compose" ]]; then
+    probe_cmd=(
+      docker compose -f "${COMPOSE_FILE}" exec -T
+      -e "GATEWAY_MCP_URL=${GATEWAY_MCP_URL:-http://127.0.0.1:8080/mcp}"
+      -e "EXPECTED_CLIENT_IDENTITY=${EXPECTED_CLIENT_IDENTITY}"
+      -e PYTHONUNBUFFERED=1
+      gateway uv run python -u -
+    )
+  else
+    probe_cmd=(bash -c "cd '${root}' && exec uv run python -u -")
+  fi
+
+  "${probe_cmd[@]}" <<'PY'
 import asyncio
 import os
 import sys
@@ -115,7 +128,6 @@ async def main() -> None:
 
 asyncio.run(main())
 PY
-  )
 }
 
 redis_verify_probe_output() {
@@ -140,7 +152,7 @@ run_rate_limit_e2e() {
   step "Burst → 429 → wait → OK"
   local rate_log rate_output
   rate_log="$(mktemp)"
-  redis_run_probe "${root}" 2>&1 | tee "${rate_log}" | sed 's/^/      /'
+  redis_run_probe "${root}" "${mode}" 2>&1 | tee "${rate_log}" | sed 's/^/      /'
   if (( PIPESTATUS[0] != 0 )); then
     rm -f "${rate_log}"
     fail "rate limit probe failed"

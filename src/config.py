@@ -97,9 +97,7 @@ def _load_tracing_config() -> TracingConfig:
 
 
 def _load_rate_limit_config() -> RateLimitConfig:
-    redis_url = os.environ.get(
-        "GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0"
-    ).strip()
+    redis_url = os.environ.get("GATEWAY_REDIS_URL", "redis://127.0.0.1:6379/0").strip()
     return RateLimitConfig(redis_url=redis_url)
 
 

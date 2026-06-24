@@ -39,12 +39,8 @@ class TestRateLimitService:
     ) -> None:
         monkeypatch.setattr("services.rate_limit.RATE_LIMIT_CALLS", 2)
 
-        assert (
-            await service.check("alice", request_id=1, tool_name="echo") is None
-        )
-        assert (
-            await service.check("alice", request_id=2, tool_name="echo") is None
-        )
+        assert await service.check("alice", request_id=1, tool_name="echo") is None
+        assert await service.check("alice", request_id=2, tool_name="echo") is None
 
         denial = await service.check("alice", request_id=3, tool_name="echo")
         assert denial is not None
@@ -89,9 +85,7 @@ class TestRateLimitService:
         denial = await service.check("alice", request_id=2, tool_name="echo")
         assert denial is not None
 
-        assert (
-            await service.check("bob", request_id=3, tool_name="echo") is None
-        )
+        assert await service.check("bob", request_id=3, tool_name="echo") is None
 
     @pytest.mark.anyio
     async def test_sets_key_expiry_on_first_call(
