@@ -64,28 +64,8 @@ class MCPService:
             tool_call = ToolsPolicyService.parse_tool_call(body)
             if tool_call is not None:
                 if client_identity is not None:
-                    with _tracer.start_as_current_span("rate_limit.check") as span:
-                        span.set_attribute("tool.name", tool_call.tool_name)
-                        span.set_attribute("client.identity", client_identity)
-                        denial = await self._rate_limit.check(
-                            client_identity,
-                            request_id=tool_call.request_id,
-                            tool_name=tool_call.tool_name,
-                        )
-                        if denial is not None:
-                            span.set_attribute("rate_limit.outcome", "rate_limited")
-                            self._audit.record_tool_call(
-                                tool_name=tool_call.tool_name,
-                                request_id=tool_call.request_id,
-                                outcome="rate_limited",
-                                client_identity=client_identity,
-                            )
-                            return ProxyResult(
-                                status_code=denial.status_code,
-                                headers=denial.headers,
-                                body=denial.body,
-                            )
-                        span.set_attribute("rate_limit.outcome", "allowed")
+                    if denial := await self._check_rate_limit(tool_call, client_identity):
+                        return denial
 
                 with _tracer.start_as_current_span("policy.check") as span:
                     span.set_attribute("tool.name", tool_call.tool_name)
@@ -153,6 +133,36 @@ class MCPService:
             headers=response_headers,
             body=content,
         )
+
+    async def _check_rate_limit(
+        self,
+        tool_call: ToolCall,
+        client_identity: str,
+    ) -> ProxyResult | None:
+        with _tracer.start_as_current_span("rate_limit.check") as span:
+            span.set_attribute("tool.name", tool_call.tool_name)
+            span.set_attribute("client.identity", client_identity)
+            denial = await self._rate_limit.check(
+                client_identity,
+                request_id=tool_call.request_id,
+                tool_name=tool_call.tool_name,
+            )
+            if denial is None:
+                span.set_attribute("rate_limit.outcome", "allowed")
+                return None
+
+            span.set_attribute("rate_limit.outcome", "rate_limited")
+            self._audit.record_tool_call(
+                tool_name=tool_call.tool_name,
+                request_id=tool_call.request_id,
+                outcome="rate_limited",
+                client_identity=client_identity,
+            )
+            return ProxyResult(
+                status_code=denial.status_code,
+                headers=denial.headers,
+                body=denial.body,
+            )
 
     @staticmethod
     async def _stream_body(response: httpx.Response) -> AsyncIterator[bytes]:
