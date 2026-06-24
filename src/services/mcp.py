@@ -64,7 +64,9 @@ class MCPService:
             tool_call = ToolsPolicyService.parse_tool_call(body)
             if tool_call is not None:
                 if client_identity is not None:
-                    if denial := await self._check_rate_limit(tool_call, client_identity):
+                    if denial := await self._check_rate_limit(
+                        tool_call, client_identity
+                    ):
                         return denial
 
                 if denial := self._check_policy(tool_call, body, client_identity):
